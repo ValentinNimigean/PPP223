@@ -1,0 +1,11 @@
+qdrant-client
+fastembed
+pydantic
+openai
+transformers
+peft
+trl
+accelerate
+bitsandbytes
+streamlit
+datasets
