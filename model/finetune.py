@@ -11,76 +11,73 @@ import os
 import torch
 
 try:
-    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, TrainingArguments
-    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-    from trl import SFTTrainer
+    from unsloth import FastLanguageModel
+    from trl import SFTTrainer, SFTConfig
     from datasets import load_dataset
 except ImportError:
-    print("Warning: Fine-tuning libraries not fully installed. Make sure to pip install transformers peft trl accelerate bitsandbytes.")
+    print("Warning: Fine-tuning libraries not fully installed. Make sure to pip install unsloth trl datasets.")
 
-def run_finetuning(model_id="Qwen/Qwen2.5-Coder-7B", dataset_path="my_curated_data.jsonl", output_dir="results"):
-    print("Loading BitsAndBytes configuration for 4-bit Quantization...")
-    # Quantize the model so it fits on a single consumer GPU
-    bnb_config = BitsAndBytesConfig(
+def run_finetuning(model_id="unsloth/Qwen2.5-Coder-7B-Instruct-bnb-4bit", dataset_path="my_curated_data.jsonl", output_dir="results"):
+    print(f"Loading Base Model: {model_id} via Unsloth...")
+    
+    # Load model and tokenizer via Unsloth (this includes BitsAndBytes config internally)
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name=model_id,
+        max_seq_length=2048,
+        dtype=None,
         load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
-        bnb_4bit_use_double_quant=True
     )
 
-    print(f"Loading Base Model: {model_id}...")
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id, 
-        quantization_config=bnb_config, 
-        device_map="auto"
-    )
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    # Do NOT leave pad_token as <|endoftext|> for Qwen
+    if tokenizer.pad_token == "<|endoftext|>" or tokenizer.pad_token is None:
+        tokenizer.pad_token = "<|fim_pad|>"
 
     # Prepare for LoRA
-    model = prepare_model_for_kbit_training(model)
-    
-    # Target Attention Modules 
-    peft_config = LoraConfig(
+    model = FastLanguageModel.get_peft_model(
+        model,
         r=16,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                        "gate_proj", "up_proj", "down_proj"],
         lora_alpha=32,
-        lora_dropout=0.05,
+        lora_dropout=0.0, # Unsloth optimizes for 0 dropout
         bias="none",
-        task_type="CAUSAL_LM",
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"]
+        use_gradient_checkpointing="unsloth",
+        random_state=3407,
     )
-    
-    model = get_peft_model(model, peft_config)
-    print(f"Trainable parameters: {model.print_trainable_parameters()}")
+    print(f"Trainable parameters set up for Unsloth.")
 
     print(f"Loading Dataset: {dataset_path}...")
-    # Assume dataset has a column called 'text' mapping Prompt + Response
+    # Assume dataset has a conversational JSONL {"messages":[...]} format
     # e.g., dataset = load_dataset('json', data_files=dataset_path)
 
-    training_args = TrainingArguments(
+    cfg = SFTConfig(
         output_dir=output_dir,
+        num_train_epochs=3,
         per_device_train_batch_size=2,
-        gradient_accumulation_steps=4,
+        gradient_accumulation_steps=8,
         learning_rate=2e-4,
-        logging_steps=10,
-        max_steps=100, # Use epochs for a real run
-        optim="paged_adamw_8bit"
+        bf16=True, 
+        logging_steps=10, 
+        save_strategy="epoch",
+        max_length=2048,
+        packing=False,
+        assistant_only_loss=True,        # train on assistant turns only
+        eos_token="<|im_end|>",          # required for Qwen
     )
 
     trainer = SFTTrainer(
-        model=model,
+        model=model, 
+        args=cfg,
         # train_dataset=dataset['train'],
-        peft_config=peft_config,
-        dataset_text_field="text",
-        max_seq_length=1024, # Truncate long code blocks
-        tokenizer=tokenizer,
-        args=training_args
+        processing_class=tokenizer,      # NOT tokenizer=
     )
 
     print("Starting QLoRA Training...")
     # trainer.train()
     
-    # print("Saving adapter...")
-    # trainer.model.save_pretrained(f"{output_dir}/final_adapter")
+    # print("Saving adapter and merged GGUF...")
+    # model.save_pretrained_merged(f"{output_dir}/merged", tokenizer, save_method="merged_16bit")
+    # model.save_pretrained_gguf(f"{output_dir}/gguf", tokenizer, quantization_method="q4_k_m")
 
 if __name__ == "__main__":
     print("Fine-tuning module is ready. Provide data and uncomment trainer.train() to begin.")

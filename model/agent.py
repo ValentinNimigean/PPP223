@@ -3,7 +3,7 @@ from openai import OpenAI
 from model.tools import AgentTools
 
 class SLMAgent:
-    def __init__(self, repo_map_string: str = "", base_url: str = "http://localhost:11434/v1", model: str = "qwen2.5-coder:7b"):
+    def __init__(self, repo_map_string: str = "", base_url: str = "http://localhost:11434/v1", model: str = "my-mobtrap-coder"):
         """
         Initializes the SLM Agent pointing to a local Ollama server by default.
         """
@@ -41,7 +41,7 @@ class SLMAgent:
             
         return "Tool not recognized."
 
-    def ask(self, user_prompt: str) -> str:
+    def ask(self, user_prompt: str, max_turns: int = 8) -> str:
         print(f"\n[Agent] Thinking about: {user_prompt}")
         messages = [
             {
@@ -54,40 +54,34 @@ class SLMAgent:
         tools = AgentTools.get_tool_schemas()
         
         try:
-            # First Pass: Ask the SLM
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=tools,
-                tool_choice="auto"
-            )
-            
-            message = response.choices[0].message
-            
-            # If the model decided to call tools
-            if message.tool_calls:
-                messages.append(message.to_dict()) # Append the assistant's tool call request
+            for _ in range(max_turns):
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="auto"
+                )
                 
-                for tool_call in message.tool_calls:
+                msg = response.choices[0].message
+                messages.append(msg.model_dump(exclude_none=True))
+                
+                # If the model didn't call any tools, we are done
+                if not msg.tool_calls:
+                    return msg.content
+                
+                # If it did call tools, execute them
+                for tool_call in msg.tool_calls:
                     tool_result = self._execute_tool(tool_call)
-                    # Tell the model what the tool found
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "name": tool_call.function.name,
-                        "content": tool_result
+                        "content": str(tool_result)
                     })
-                
-                print(f"[Agent] Tool results gathered. Generating final response...")
-                # Second Pass: Send the results back for the final answer
-                final_response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages
-                )
-                return final_response.choices[0].message.content
-                
-            # If no tool was needed
-            return message.content
+                    
+                print(f"[Agent] Tool results gathered. Sending back for reasoning...")
+            
+            return f"Agent exceeded maximum turns ({max_turns}) without reaching a final answer."
             
         except Exception as e:
             return f"Agent Execution Error: {e}\n(Make sure Ollama is running at {self.client.base_url} with model {self.model})"

@@ -1,5 +1,5 @@
-qdrant-client
-fastembed
+qdrant-client[fastembed]>=1.12.0
+fastembed>=0.6.1
 pydantic
 openai
 transformers
@@ -9,3 +9,7 @@ accelerate
 bitsandbytes
 streamlit
 datasets
+unsloth
+grimp
+tree-sitter
+tree-sitter-python

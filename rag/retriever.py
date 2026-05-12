@@ -1,4 +1,4 @@
-from qdrant_client import QdrantClient
+from qdrant_client import QdrantClient, models
 from typing import List, Dict, Any
 from ingest.metadata import CodeChunk
 
@@ -40,12 +40,16 @@ class HybridRetriever:
         """
         Executes a hybrid search (Dense + Sparse) against the ingested chunks.
         """
-        # Utilizing client.query automatically performs a Hybrid Search with RRF if both models are set
-        results = self.client.query(
+        # Utilizing client.query_points with FusionQuery performs a Hybrid Search with RRF
+        results = self.client.query_points(
             collection_name=self.collection_name,
-            query_text=query,
+            prefetch=[
+                models.Prefetch(query=models.SparseVectorQuery(name="bm25", text=query), limit=limit),
+                models.Prefetch(query=models.DenseVectorQuery(name="dense", text=query), limit=limit),
+            ],
+            query=models.FusionQuery(fusion=models.Fusion.RRF),
             limit=limit
-        )
+        ).points
         
         extracted = []
         for result in results:

@@ -8,9 +8,9 @@ WARNING: Requires 12GB+ NVIDIA VRAM. Do not execute on consumer ultra-books.
 
 import torch
 try:
-    from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
+    from transformers import AutoModelForCausalLM, AutoTokenizer
     from peft import LoraConfig, get_peft_model
-    from trl import DPOTrainer
+    from trl import DPOTrainer, DPOConfig
     from datasets import load_dataset
 except ImportError:
     print("Warning: Missing DPO dependencies. Make sure trl and datasets are installed.")
@@ -18,20 +18,13 @@ except ImportError:
 def run_dpo(model_id="Qwen/Qwen2.5-Coder-7B", dpo_data_path="preference_data.jsonl", output_dir="dpo_results"):
     print("Initializing DPO RLHF Pipeline...")
     
-    # 1. Load Reference and Target Models
+    # 1. Load Model
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token = "<|fim_pad|>"
         
     model = AutoModelForCausalLM.from_pretrained(
         model_id, 
-        device_map="auto",
-        torch_dtype=torch.bfloat16
-    )
-    
-    # The reference model acts as the baseline probabilities to compare against
-    ref_model = AutoModelForCausalLM.from_pretrained(
-        model_id,
         device_map="auto",
         torch_dtype=torch.bfloat16
     )
@@ -45,32 +38,39 @@ def run_dpo(model_id="Qwen/Qwen2.5-Coder-7B", dpo_data_path="preference_data.jso
         task_type="CAUSAL_LM",
         target_modules=["q_proj", "v_proj"]
     )
-    model = get_peft_model(model, peft_config)
+    
+    # Do not call get_peft_model here, let DPOTrainer handle it.
 
     # 3. Load Preference Data
     # DPO requires 3 columns: "prompt", "chosen" (good code), "rejected" (hallucinations)
     print(f"Loading preference dataset from {dpo_data_path}...")
     # dataset = load_dataset("json", data_files=dpo_data_path)
     
-    # 4. Configure DPO Trainer
-    training_args = TrainingArguments(
+    # 4. Configure DPO Trainer using DPOConfig (TRL 0.25+)
+    dpo_cfg = DPOConfig(
         output_dir=output_dir,
         per_device_train_batch_size=1,
         gradient_accumulation_steps=8,
-        learning_rate=5e-5,
+        learning_rate=5e-6,
         logging_steps=10,
         max_steps=200,
         remove_unused_columns=False,
-        optim="paged_adamw_8bit"
+        optim="paged_adamw_8bit",
+        beta=0.1, # KL penalty constraint (determines how far it can deviate from ref)
+        max_length=1024,
+        max_prompt_length=512,
+        loss_type="sigmoid",
+        truncation_mode="keep_end",
+        bf16=True,
     )
 
     # dpo_trainer = DPOTrainer(
-    #     model,
-    #     ref_model,
-    #     args=training_args,
-    #     beta=0.1, # KL penalty constraint (determines how far it can deviate from ref)
+    #     model=model,
+    #     ref_model=None, # ref_model=None is explicitly supported and recommended with PEFT
+    #     args=dpo_cfg,
     #     train_dataset=dataset['train'],
-    #     tokenizer=tokenizer,
+    #     processing_class=tokenizer,
+    #     peft_config=peft_config,
     # )
 
     print("DPO Environment Ready. Ensure dataset contains 'prompt', 'chosen', and 'rejected' columns, then uncomment execution.")
