@@ -1,11 +1,16 @@
-import subprocess
 import json
+import logging
+import os
+import re
 from typing import List, Dict, Any
+
+logger = logging.getLogger(__name__)
 
 class AgentTools:
     """
     A collection of tools that the SLM can call.
     """
+    SEARCHABLE_EXTENSIONS = {".py", ".md", ".toml", ".cfg", ".yaml", ".yml", ".json", ".txt"}
     
     @staticmethod
     def get_tool_schemas() -> List[Dict[str, Any]]:
@@ -58,19 +63,20 @@ class AgentTools:
         """
         Executes a local grep (or equivalent python implementation) to find literal matches.
         """
+        # Validate regex pattern
         try:
-            # We use git grep if available, fallback to basic python parsing or findstr on windows
-            # Since this is windows, findstr is safer native. But grep is cleaner if WSL/GitBash.
-            # Using python's basic traversal as a cross-platform safe 'grep':
-            import os
-            import re
-            
+            re.compile(pattern)
+        except re.error as e:
+            return f"Invalid regex pattern: {e}"
+
+        try:
             results = []
             for root, _, files in os.walk(directory):
                 if '.git' in root or '__pycache__' in root or 'venv' in root:
                     continue
                 for file in files:
-                    if file.endswith('.py') or file.endswith('.md'):
+                    ext = os.path.splitext(file)[1]
+                    if ext in AgentTools.SEARCHABLE_EXTENSIONS:
                         filepath = os.path.join(root, file)
                         try:
                             with open(filepath, 'r', encoding='utf-8') as f:
@@ -78,12 +84,18 @@ class AgentTools:
                                 for i, line in enumerate(lines):
                                     if re.search(pattern, line):
                                         results.append(f"{filepath}:{i+1}:{line.strip()}")
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Could not read {filepath}: {e}")
             
             if not results:
                 return "No matches found."
-            return "\n".join(results[:50]) # Limit output size
+            
+            if len(results) > 50:
+                truncation_note = f"\n[Truncated: showing 50 of {len(results)} matches]"
+            else:
+                truncation_note = ""
+                
+            return "\n".join(results[:50]) + truncation_note
             
         except Exception as e:
             return f"Error executing search: {str(e)}"

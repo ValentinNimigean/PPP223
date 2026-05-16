@@ -1,9 +1,15 @@
 import json
+import logging
 from openai import OpenAI
 from model.tools import AgentTools
+from eval.hallucination import HallucinationDetector
+from ingest.metadata import CodeChunk
+from typing import List
+
+logger = logging.getLogger(__name__)
 
 class SLMAgent:
-    def __init__(self, repo_map_string: str = "", base_url: str = "http://localhost:11434/v1", model: str = "my-mobtrap-coder"):
+    def __init__(self, repo_map_string: str = "", base_url: str = "http://localhost:11434/v1", model: str = "qwen2.5-coder:3b", hallucination_check: bool = False):
         """
         Initializes the SLM Agent pointing to a local Ollama server by default.
         """
@@ -14,9 +20,17 @@ class SLMAgent:
         self.model = model
         self.repo_map = repo_map_string
         self.retriever = None
+        self.hallucination_check = hallucination_check
+        self._chunks = []
+        self._detector = None
 
     def set_retriever(self, retriever):
         self.retriever = retriever
+
+    def set_chunks(self, chunks: List[CodeChunk]):
+        self._chunks = chunks
+        if self.hallucination_check:
+            self._detector = HallucinationDetector(chunks)
 
     def _execute_tool(self, tool_call) -> str:
         name = tool_call.function.name
@@ -25,7 +39,7 @@ class SLMAgent:
         except Exception:
             args = {}
             
-        print(f"\n[Agent Action] Executing Tool: {name} | Args: {args}")
+        logger.debug(f"\n[Agent Action] Executing Tool: {name} | Args: {args}")
         
         if name == "grep_search":
             return AgentTools.grep_search(args.get("pattern", ""))
@@ -42,7 +56,7 @@ class SLMAgent:
         return "Tool not recognized."
 
     def ask(self, user_prompt: str, max_turns: int = 8) -> str:
-        print(f"\n[Agent] Thinking about: {user_prompt}")
+        logger.debug(f"\n[Agent] Thinking about: {user_prompt}")
         messages = [
             {
                 "role": "system",
@@ -63,11 +77,19 @@ class SLMAgent:
                 )
                 
                 msg = response.choices[0].message
-                messages.append(msg.model_dump(exclude_none=True))
+                msg_dict = msg.model_dump()
+                messages.append({k: v for k, v in msg_dict.items() if v is not None or k == "content"})
                 
                 # If the model didn't call any tools, we are done
                 if not msg.tool_calls:
-                    return msg.content
+                    final_content = msg.content
+                    if self._detector is not None:
+                        scan = self._detector.scan(final_content)
+                        logger.debug(self._detector.format_report(scan))
+                        if scan["hallucination_risk"] == "high":
+                            warning = f"\n\n⚠️ Hallucination Warning: {len(scan['unverified_entities'])} unverified entities detected: {scan['unverified_entities']}"
+                            return final_content + warning
+                    return final_content
                 
                 # If it did call tools, execute them
                 for tool_call in msg.tool_calls:
@@ -79,9 +101,9 @@ class SLMAgent:
                         "content": str(tool_result)
                     })
                     
-                print(f"[Agent] Tool results gathered. Sending back for reasoning...")
+                logger.debug(f"[Agent] Tool results gathered. Sending back for reasoning...")
             
             return f"Agent exceeded maximum turns ({max_turns}) without reaching a final answer."
             
         except Exception as e:
-            return f"Agent Execution Error: {e}\n(Make sure Ollama is running at {self.client.base_url} with model {self.model})"
+            return f"Agent Execution Error: {e}\n(Make sure Ollama is running: 'ollama run qwen2.5-coder:3b' at {self.client.base_url})"

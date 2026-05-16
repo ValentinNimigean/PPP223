@@ -1,0 +1,13 @@
+# WARNING: Requires NVIDIA GPU with CUDA 12.1+ and 6GB+ VRAM.
+# Install with: pip install -r requirements-train.txt
+# unsloth is installed from source -- do not use PyPI version.
+
+-r requirements.txt
+torch>=2.3.0
+transformers>=4.46.0,<4.48.0
+peft>=0.14.0,<0.15.0
+trl>=0.13.0,<0.14.0
+accelerate>=0.33.0,<0.34.0
+bitsandbytes>=0.43.0,<0.44.0
+datasets>=3.0.0,<4.0.0
+unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git

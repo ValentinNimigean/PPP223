@@ -3,6 +3,9 @@ from typing import List, Dict, Any
 from ingest.metadata import CodeChunk
 
 class HybridRetriever:
+    DENSE_VECTOR_NAME = "fast-bge-small-en-v1.5"
+    SPARSE_VECTOR_NAME = "fast-sparse-bm25"
+
     def __init__(self):
         # We use an in-memory database for fast prototyping.
         # This will automatically utilize fastembed for embeddings.
@@ -37,25 +40,72 @@ class HybridRetriever:
         print("Ingestion complete.")
 
     def search(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """
-        Executes a hybrid search (Dense + Sparse) against the ingested chunks.
-        """
-        # Utilizing client.query_points with FusionQuery performs a Hybrid Search with RRF
         results = self.client.query_points(
             collection_name=self.collection_name,
             prefetch=[
-                models.Prefetch(query=models.SparseVectorQuery(name="bm25", text=query), limit=limit),
-                models.Prefetch(query=models.DenseVectorQuery(name="dense", text=query), limit=limit),
+                models.Prefetch(query=query, using=self.SPARSE_VECTOR_NAME, limit=limit),
+                models.Prefetch(query=query, using=self.DENSE_VECTOR_NAME, limit=limit),
             ],
             query=models.FusionQuery(fusion=models.Fusion.RRF),
             limit=limit
         ).points
-        
+
         extracted = []
         for result in results:
-            extracted.append({
-                "document": result.document,
-                "metadata": result.metadata,
-                "score": result.score
-            })
+            payload = result.payload or {}
+            doc_text = payload.get("document", "")
+            metadata = {k: v for k, v in payload.items() if k != "document"}
+            extracted.append({"document": doc_text, "metadata": metadata, "score": result.score})
         return extracted
+
+    @staticmethod
+    def smoke_test():
+        """
+        Validates retriever functionality with dummy data.
+        """
+        retriever = HybridRetriever()
+        
+        # Ingest 3 hardcoded CodeChunk fixtures
+        chunks = [
+            CodeChunk(
+                filepath="src/main.py",
+                chunk_type="function",
+                name="main",
+                start_line=1,
+                end_line=10,
+                text="def main():\n    print('hello world')",
+                signature="def main()"
+            ),
+            CodeChunk(
+                filepath="src/utils.py",
+                chunk_type="function",
+                name="helper",
+                start_line=5,
+                end_line=15,
+                text="def helper(x):\n    return x * 2",
+                signature="def helper(x)"
+            ),
+            CodeChunk(
+                filepath="src/app.py",
+                chunk_type="class",
+                name="App",
+                start_line=1,
+                end_line=50,
+                text="class App:\n    def run(self): pass",
+                signature="class App"
+            )
+        ]
+        
+        retriever.ingest_chunks(chunks)
+        
+        # Perform a search
+        results = retriever.search("hello", limit=2)
+        
+        # Verify results
+        assert len(results) > 0, "Retriever should return at least one result"
+        for res in results:
+            assert "document" in res, "Result missing 'document' key"
+            assert "metadata" in res, "Result missing 'metadata' key"
+            assert "score" in res, "Result missing 'score' key"
+            
+        print("Retriever OK")

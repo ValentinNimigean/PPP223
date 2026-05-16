@@ -4,8 +4,10 @@ from ingest.chunker import ASTChunker
 from ingest.metadata import CodeChunk
 
 class Loader:
+    SKIP_DIRS = frozenset({"__pycache__", ".git", ".venv", "venv", "node_modules", "site-packages", "dist-packages", ".eggs", "build", "dist"})
+
     def __init__(self, root_dir: str):
-        self.root_dir = root_dir
+        self.root_dir = os.path.abspath(root_dir)
         self.chunker = ASTChunker()
 
     def process_directory(self) -> List[CodeChunk]:
@@ -13,13 +15,18 @@ class Loader:
         Crawls the root directory, reads all .py files, and chunks them.
         """
         all_chunks = []
+        files_scanned = 0
+        files_errored = 0
+        
         for dirpath, _, filenames in os.walk(self.root_dir):
-            for file in filenames:
-                file_path = os.path.join(dirpath, file)
+            # Skip common junk/dependency directories
+            if any(skip in dirpath.split(os.sep) for skip in self.SKIP_DIRS):
+                continue
                 
-                # We only want to process python files 
-                # (and ideally ignore hidden dirs like .vscode or venv)
-                if file.endswith(".py") and ".venv" not in dirpath and ".git" not in dirpath and "venv" not in dirpath:
+            for file in filenames:
+                if file.endswith(".py"):
+                    file_path = os.path.join(dirpath, file)
+                    files_scanned += 1
                     try:
                         with open(file_path, "r", encoding="utf-8") as f:
                             source = f.read()
@@ -33,7 +40,9 @@ class Loader:
                         all_chunks.extend(chunks)
                     except Exception as e:
                         print(f"Error reading {file_path}: {e}")
-                        
+                        files_errored += 1
+        
+        print(f"[Loader] Scanned {files_scanned} .py files -> {len(all_chunks)} chunks extracted ({files_errored} files skipped due to errors)")
         return all_chunks
 
     def _fallback_tree_sitter_chunk(self, filepath: str, source: str) -> List[CodeChunk]:

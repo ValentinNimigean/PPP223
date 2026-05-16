@@ -1,9 +1,9 @@
 """
 Phase 3: DPO (Direct Preference Optimization) Template
 Used to mathematically rank outputs to reduce hallucination.
-Week 11 Deliverable.
+Run after SFT. Requires preference_data.jsonl from data/pref_gen.py.
 
-WARNING: Requires 12GB+ NVIDIA VRAM. Do not execute on consumer ultra-books.
+WARNING: Requires 6GB+ NVIDIA VRAM. Do not execute on consumer ultra-books.
 """
 
 import torch
@@ -15,7 +15,7 @@ try:
 except ImportError:
     print("Warning: Missing DPO dependencies. Make sure trl and datasets are installed.")
 
-def run_dpo(model_id="Qwen/Qwen2.5-Coder-7B", dpo_data_path="preference_data.jsonl", output_dir="dpo_results"):
+def run_dpo(model_id="Qwen/Qwen2.5-Coder-3B-Instruct", dpo_data_path="preference_data.jsonl", output_dir="dpo_results"):
     print("Initializing DPO RLHF Pipeline...")
     
     # 1. Load Model
@@ -31,8 +31,8 @@ def run_dpo(model_id="Qwen/Qwen2.5-Coder-7B", dpo_data_path="preference_data.jso
 
     # 2. Setup LoRA (Apply RLHF efficiently)
     peft_config = LoraConfig(
-        r=16,
-        lora_alpha=32,
+        r=32,
+        lora_alpha=64,
         lora_dropout=0.05,
         bias="none",
         task_type="CAUSAL_LM",
@@ -44,12 +44,12 @@ def run_dpo(model_id="Qwen/Qwen2.5-Coder-7B", dpo_data_path="preference_data.jso
     # 3. Load Preference Data
     # DPO requires 3 columns: "prompt", "chosen" (good code), "rejected" (hallucinations)
     print(f"Loading preference dataset from {dpo_data_path}...")
-    # dataset = load_dataset("json", data_files=dpo_data_path)
+    dataset = load_dataset("json", data_files=dpo_data_path, split="train")
     
     # 4. Configure DPO Trainer using DPOConfig (TRL 0.25+)
     dpo_cfg = DPOConfig(
         output_dir=output_dir,
-        per_device_train_batch_size=1,
+        per_device_train_batch_size=2,
         gradient_accumulation_steps=8,
         learning_rate=5e-6,
         logging_steps=10,
@@ -64,17 +64,20 @@ def run_dpo(model_id="Qwen/Qwen2.5-Coder-7B", dpo_data_path="preference_data.jso
         bf16=True,
     )
 
-    # dpo_trainer = DPOTrainer(
-    #     model=model,
-    #     ref_model=None, # ref_model=None is explicitly supported and recommended with PEFT
-    #     args=dpo_cfg,
-    #     train_dataset=dataset['train'],
-    #     processing_class=tokenizer,
-    #     peft_config=peft_config,
-    # )
+    dpo_trainer = DPOTrainer(
+        model=model,
+        ref_model=None, # ref_model=None is explicitly supported and recommended with PEFT
+        args=dpo_cfg,
+        train_dataset=dataset,
+        processing_class=tokenizer,
+        peft_config=peft_config,
+    )
 
-    print("DPO Environment Ready. Ensure dataset contains 'prompt', 'chosen', and 'rejected' columns, then uncomment execution.")
-    # dpo_trainer.train()
+    if torch.cuda.is_available():
+        dpo_trainer.train()
+        dpo_trainer.save_model(f"{output_dir}/adapter")
+    else:
+        raise EnvironmentError("CUDA GPU required for DPO. Aborting.")
 
 if __name__ == "__main__":
     print("DPO Module imported. Run run_dpo() when dataset is compiled.")

@@ -11,7 +11,7 @@ from rag.retriever import HybridRetriever
 from model.agent import SLMAgent
 
 # Set Page Configuration for maximum width and title
-st.set_page_config(page_title="SLM Code Assistant", page_icon="💻", layout="wide")
+st.set_page_config(page_title="SLM Code Assistant", page_icon="code", layout="wide")
 
 # Inject Custom Framework CSS for "Glassmorphic" Premium UI
 st.markdown("""
@@ -53,12 +53,31 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Cache the heavy resource loading so it persists across UI re-renders
-@st.cache_resource
-def load_backend():
-    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Initialize session state
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "target_repo" not in st.session_state:
+    st.session_state.target_repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Render dynamic Sidebar settings first
+with st.sidebar:
+    st.header("Settings")
+    new_repo = st.text_input("Local Repository Path", value=st.session_state.target_repo, help="The absolute path to the Python project you want to analyze.")
     
-    loader = Loader(root_dir)
+    if new_repo != st.session_state.target_repo:
+        st.session_state.target_repo = new_repo
+        st.cache_resource.clear()
+        st.session_state.messages = []
+        st.rerun()
+
+    if not os.path.isdir(st.session_state.target_repo):
+        st.warning(f"Directory not found: {st.session_state.target_repo}")
+        st.stop()
+
+# Cache the heavy resource loading
+@st.cache_resource
+def load_backend(repo_path):
+    loader = Loader(repo_path)
     chunks = loader.process_directory()
     repo_map_gen = RepoMapGenerator()
     repo_map_string = repo_map_gen.generate_map(chunks)
@@ -67,32 +86,30 @@ def load_backend():
     retriever.ingest_chunks(chunks)
     
     # Init Agent
-    agent = SLMAgent(repo_map_string=repo_map_string)
+    agent = SLMAgent(repo_map_string=repo_map_string, hallucination_check=True)
     agent.set_retriever(retriever)
+    agent.set_chunks(chunks)
     
     return agent, repo_map_string, chunks
 
-st.title("🚀 Python SLM Agent Assistant")
-st.caption("powered by Qwen-2.5-Coder (Local) & Hybrid Qdrant Search | Built by Team Mobtrap")
+st.title("Python SLM Agent Assistant")
+st.caption("powered by Qwen2.5-Coder-3B (Local via Ollama) & Hybrid Qdrant Search")
 
-with st.spinner("Analyzing Repository and Booting Agent..."):
-    agent, repo_map, chunks = load_backend()
+with st.spinner(f"Analyzing {st.session_state.target_repo} and Booting Agent..."):
+    agent, repo_map, chunks = load_backend(st.session_state.target_repo)
 
 # Render dynamic Sidebar
 with st.sidebar:
-    st.header("📂 Repository Map")
+    st.header("Repository Map")
     st.success(f"{len(chunks)} Logical Chunks Extracted via AST")
     
     with st.expander("View Full Map", expanded=True):
         st.code(repo_map, language="markdown")
         
     st.divider()
-    st.info("The SLM Agent has autonomous access to Semantic Search and Exact-Match Grep. It connects via local Ollama API on port 11434.")
+    st.info("The SLM Agent (qwen2.5-coder:3b) has autonomous access to Semantic Search and Exact-Match Grep. It connects via local Ollama API on port 11434.")
 
 # Initialize Chat Memory
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
 # Render chat history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
@@ -113,6 +130,6 @@ if prompt := st.chat_input("Ask a question about the codebase... (e.g. 'How does
                 st.markdown(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
             except Exception as e:
-                error_msg = f"⚠️ **Connection Failed.** Please make sure your local Ollama daemon is running with `ollama run qwen2.5-coder:7b`.\n\n*Error Detail: {e}*"
+                error_msg = f"**Connection Failed.** Please make sure your local Ollama daemon is running with `ollama run qwen2.5-coder:3b`.\n\n*Error Detail: {e}*"
                 st.error(error_msg)
                 st.session_state.messages.append({"role": "assistant", "content": error_msg})

@@ -5,6 +5,7 @@ class CodeChunk(BaseModel):
     filepath: str = Field(description="The path to the file containing this chunk.")
     chunk_type: str = Field(description="The type of the chunk: 'class', 'function', or 'method'.")
     name: str = Field(description="The name of the class or function.")
+    qualified_name: Optional[str] = Field(default=None, description="The dotted path of the chunk (e.g. 'Class.method').")
     parent_class: Optional[str] = Field(default=None, description="The name of the parent class, if this is a method.")
     start_line: int = Field(description="The starting line number of the chunk (1-indexed).")
     end_line: int = Field(description="The ending line number of the chunk (1-indexed).")

@@ -5,6 +5,7 @@ from ingest.loader import Loader
 from data.dep_graph import DependencyGraph
 
 TEACHER_SYSTEM = """You generate Q&A training pairs for a code-understanding model.
+The target model is Qwen2.5-Coder-3B; generate answers calibrated for a smaller model: shorter, more explicit, and step-by-step rather than assuming implicit reasoning.
 Given a Python code chunk and structured facts about its relationships in a repo,
 produce 3 diverse natural-language Q&A pairs. Vary phrasing: some lookup-style
 ("where is X defined?"), some semantic ("what does X do?"), some multi-hop
@@ -18,8 +19,9 @@ def generate_synthetic_data(repo_root: str, output_file: str, model: str = "gpt-
     
     print(f"Building dependency graph...")
     # Passing the repo root folder name or '.' if we're inside it
-    pkg_name = os.path.basename(os.path.abspath(repo_root)) or "."
-    graph = DependencyGraph(pkg_name)
+    pkg_dir = os.path.abspath(repo_root)
+    pkg_name = os.path.basename(pkg_dir)
+    graph = DependencyGraph(pkg_name=pkg_name, pkg_dir=pkg_dir)
     graph.build()
     
     # Initialize teacher LLM (requires OPENAI_API_KEY if using OpenAI, or configure local base_url)
@@ -33,7 +35,7 @@ def generate_synthetic_data(repo_root: str, output_file: str, model: str = "gpt-
     
     with open(output_file, "w", encoding="utf-8") as out:
         for chunk in chunks:
-            deps = graph.get_chunk_deps(chunk.filepath, chunk.name)
+            deps = graph.get_chunk_deps(chunk.filepath, chunk.name, chunk.parent_class)
             
             prompt_content = (
                 f"<chunk path={chunk.filepath} name={chunk.name}>\n"
@@ -79,5 +81,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", default=".")
     parser.add_argument("--out", default="synthetic_qa.jsonl")
+    parser.add_argument("--model", default="gpt-4o", help="Teacher LLM model name.")
     args = parser.parse_args()
-    generate_synthetic_data(args.repo, args.out)
+    generate_synthetic_data(args.repo, args.out, model=args.model)

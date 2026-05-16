@@ -13,6 +13,30 @@
 ## Overview
 This project focuses on building a Small Language Model (SLM) agent designed for deep Python code understanding. The core objective is to move beyond simple text-matching to create a system that understands the hierarchical nature of Python.
 
+
+---
+
+## Installation
+
+Choose the installation path that matches your use case:
+
+- **Dev/Demo (Runtime Only):**
+  ```bash
+  pip install -r requirements.txt
+  ```
+  *Note: Requires Ollama to be running locally for SLM inference.*
+
+- **Training (GPU Machine Only):**
+  ```bash
+  pip install -r requirements-train.txt
+  ```
+  *Note: Requires NVIDIA GPU with CUDA 12.1+. VRAM: 4-6GB (SFT), 6GB+ (DPO).*
+
+- **Contributing (Development):**
+  ```bash
+  pip install -r requirements-dev.txt
+  ```
+
 ---
 
 ## Architecture
@@ -28,7 +52,7 @@ We have moved away from character-count chunking in favor of Abstract Syntax Tre
 * **Context Preservation:** Every chunk includes decorators, function signatures, and inheritance info to ensure the model maintains the "context" of a code snippet.
 
 ### 3. Model & Vector Database Choices
-* **Primary Models:** Qwen-2.5-Coder (7B/14B) is used as the baseline for code reasoning, with Phi-4-mini as a lightweight alternative for basic tasks.
+* **Primary Models:** Qwen2.5-Coder-3B as the primary model, 1.5B as the lightweight fallback
 * **Vector Storage:** Qdrant is selected for its advanced filtering capabilities, allowing for specific metadata queries (e.g., finding methods within a specific class).
 
 ### 4. RAG Strategies

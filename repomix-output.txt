@@ -1,0 +1,2394 @@
+This file is a merged representation of a subset of the codebase, containing files not matching ignore patterns, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching these patterns are excluded: repomix-output.txt, repomix-output.xml, *.pyc, __pycache__, .git, .venv, qdrant_storage, fastembed_cache, scratch
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+data/
+  dep_graph.py
+  pref_gen.py
+  synth.py
+eval/
+  __init__.py
+  eval.py
+  hallucination.py
+ingest/
+  chunker.py
+  loader.py
+  metadata.py
+model/
+  agent.py
+  dpo.py
+  finetune.py
+  inference.py
+  tools.py
+plan/
+  llm_presentation_team_mobtrap.pdf
+rag/
+  repo_map.py
+  retriever.py
+ui/
+  app.py
+  cli.py
+.gitignore
+LICENSE
+main.py
+README.md
+repomix.config.json
+requirements-dev.txt
+requirements-train.txt
+requirements.txt
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="data/pref_gen.py">
+import json
+import argparse
+import os
+import sys
+import time
+from typing import List, Dict, Any, Optional
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+try:
+    from openai import OpenAI
+except ImportError:
+    print("Error: 'openai' package not found. Please install it with 'pip install openai'.")
+    sys.exit(1)
+
+def get_cli_args():
+    parser = argparse.ArgumentParser(description="Generate DPO preference data for RLHF.")
+    parser.add_argument("--input", required=True, help="Path to synthetic_qa.jsonl")
+    parser.add_argument("--output", default="preference_data.jsonl", help="Path to preference_data.jsonl")
+    parser.add_argument("--model", default="gpt-4o", help="Teacher model")
+    parser.add_argument("--judge", default="gpt-4o", help="Judge model")
+    parser.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI-compatible base URL")
+    parser.add_argument("--limit", type=int, help="Max rows to process")
+    return parser.parse_args()
+
+def load_existing_prompts(output_path: str) -> set:
+    seen_prompts = set()
+    if os.path.exists(output_path):
+        with open(output_path, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    data = json.loads(line)
+                    if "prompt" in data:
+                        seen_prompts.add(data["prompt"])
+                except json.JSONDecodeError:
+                    continue
+    return seen_prompts
+
+def main():
+    args = get_cli_args()
+    
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        print("Error: OPENAI_API_KEY environment variable not set.")
+        sys.exit(1)
+        
+    client = OpenAI(api_key=api_key, base_url=args.base_url)
+    
+    seen_prompts = load_existing_prompts(args.output)
+    
+    written_count = 0
+    skipped_count = 0
+    failed_count = 0
+    
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+    
+    judge_system_prompt = (
+        "You are a strict judge evaluating answers about a Python codebase. "
+        "Return ONLY a JSON object with keys 'best' (int, 0-2), 'worst' (int, 0-2), "
+        "and 'reasoning' (str). Prefer answers that: are grounded in provided code, "
+        "do not hallucinate function names, are concise, and correctly identify "
+        "relationships. Do not include markdown or explanation outside the JSON."
+    )
+    
+    if not os.path.exists(args.input):
+        print(f"Error: Input file {args.input} not found.")
+        sys.exit(1)
+        
+    with open(args.input, "r", encoding="utf-8") as f_in, \
+         open(args.output, "a", encoding="utf-8") as f_out:
+        
+        rows_processed = 0
+        for line in f_in:
+            if args.limit and rows_processed >= args.limit:
+                break
+                
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+                
+            # Extract user question
+            messages = row.get("messages", [])
+            user_question = ""
+            for msg in messages:
+                if msg.get("role") == "user":
+                    user_question = msg.get("content", "")
+                    break
+            
+            if not user_question:
+                continue
+                
+            if user_question in seen_prompts:
+                skipped_count += 1
+                continue
+            
+            # Generate 3 candidates
+            candidates = []
+            temperatures = [0.9, 0.9, 0.1]
+            
+            gen_failed = False
+            for temp in temperatures:
+                try:
+                    response = client.chat.completions.create(
+                        model=args.model,
+                        messages=[{"role": "user", "content": user_question}],
+                        temperature=temp
+                    )
+                    candidates.append(response.choices[0].message.content)
+                    total_prompt_tokens += response.usage.prompt_tokens
+                    total_completion_tokens += response.usage.completion_tokens
+                except Exception as e:
+                    print(f"Warning: Teacher generation failed: {e}")
+                    gen_failed = True
+                    break
+            
+            if gen_failed:
+                failed_count += 1
+                continue
+                
+            # Call Judge
+            judge_user_content = f"Question: {user_question}\n\n"
+            for i, cand in enumerate(candidates):
+                judge_user_content += f"[{i}]: {cand}\n\n"
+            
+            try:
+                judge_response = client.chat.completions.create(
+                    model=args.judge,
+                    messages=[
+                        {"role": "system", "content": judge_system_prompt},
+                        {"role": "user", "content": judge_user_content}
+                    ],
+                    temperature=0.0,
+                    response_format={"type": "json_object"}
+                )
+                judge_text = judge_response.choices[0].message.content
+                judge_data = json.loads(judge_text)
+                
+                best_idx = judge_data.get("best")
+                worst_idx = judge_data.get("worst")
+                
+                if not isinstance(best_idx, int) or not isinstance(worst_idx, int):
+                    raise ValueError("Judge returned non-integer indices")
+                
+                if best_idx < 0 or best_idx > 2 or worst_idx < 0 or worst_idx > 2:
+                    raise ValueError("Judge returned out-of-bounds indices")
+                
+                total_prompt_tokens += judge_response.usage.prompt_tokens
+                total_completion_tokens += judge_response.usage.completion_tokens
+                
+                # Write to output
+                output_row = {
+                    "prompt": user_question,
+                    "chosen": candidates[best_idx],
+                    "rejected": candidates[worst_idx]
+                }
+                f_out.write(json.dumps(output_row) + "\n")
+                f_out.flush()
+                
+                seen_prompts.add(user_question)
+                written_count += 1
+                rows_processed += 1
+                
+            except Exception as e:
+                print(f"Warning: Judge evaluation failed for row: {e}")
+                failed_count += 1
+                continue
+
+    # Final summary
+    print(f"Done. Written: {written_count} rows. Skipped (already exists): {skipped_count} rows. Failed (judge error): {failed_count} rows.")
+    
+    # Cost calculation
+    # $5/1M input $15/1M output
+    cost_input = (total_prompt_tokens / 1_000_000) * 5.0
+    cost_output = (total_completion_tokens / 1_000_000) * 15.0
+    total_cost = cost_input + cost_output
+    
+    print(f"Total prompt tokens used: {total_prompt_tokens}")
+    print(f"Total completion tokens used: {total_completion_tokens}")
+    print(f"Estimated cost: ${total_cost:.4f}")
+
+if __name__ == "__main__":
+    main()
+</file>
+
+<file path="eval/__init__.py">
+
+</file>
+
+<file path="eval/eval.py">
+import os
+import sys
+import json
+import argparse
+import logging
+from datetime import datetime
+from typing import List, Dict, Any
+
+# Ensure root path is accessible
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from ingest.loader import Loader
+from rag.repo_map import RepoMapGenerator
+from rag.retriever import HybridRetriever
+from model.agent import SLMAgent
+
+BENCHMARK = [
+    {
+        "question": "What class handles hybrid vector search?",
+        "expected_entities": ["HybridRetriever"],
+        "expected_files": ["rag/retriever.py"]
+    },
+    {
+        "question": "What method is called to ingest code chunks into the vector database?",
+        "expected_entities": ["ingest_chunks"],
+        "expected_files": ["rag/retriever.py"]
+    },
+    {
+        "question": "What happens when a Python file has a syntax error during loading?",
+        "expected_entities": ["_fallback_tree_sitter_chunk", "SyntaxError"],
+        "expected_files": ["ingest/loader.py"]
+    },
+    {
+        "question": "Which file defines the CodeChunk data model?",
+        "expected_entities": ["CodeChunk"],
+        "expected_files": ["ingest/metadata.py"]
+    },
+    {
+        "question": "What tool does the agent use to find exact string matches in code?",
+        "expected_entities": ["grep_search"],
+        "expected_files": ["model/tools.py"]
+    },
+    {
+        "question": "What embedding model is used for dense vector search?",
+        "expected_entities": ["BAAI/bge-small-en-v1.5", "bge-small-en-v1.5"],
+        "expected_files": ["rag/retriever.py"]
+    },
+    {
+        "question": "How does the dependency graph handle methods inside classes?",
+        "expected_entities": ["get_chunk_deps", "parent_class", "qualified_name"],
+        "expected_files": ["data/dep_graph.py"]
+    },
+    {
+        "question": "What is the maximum number of agent tool-call turns before giving up?",
+        "expected_entities": ["max_turns", "8"],
+        "expected_files": ["model/agent.py"]
+    },
+    {
+        "question": "What directories does the loader skip when scanning a repo?",
+        "expected_entities": ["SKIP_DIRS", "__pycache__", ".git", "venv"],
+        "expected_files": ["ingest/loader.py"]
+    },
+    {
+        "question": "What fusion algorithm is used to combine dense and sparse search results?",
+        "expected_entities": ["RRF", "FusionQuery"],
+        "expected_files": ["rag/retriever.py"]
+    }
+]
+
+def score_response(response: str, expected_entities: List[str], expected_files: List[str]):
+    resp_lower = response.lower()
+    
+    found_entities = [e for e in expected_entities if e.lower() in resp_lower]
+    entity_score = len(found_entities) / len(expected_entities) if expected_entities else 0.0
+    
+    found_files = [f for f in expected_files if f.lower() in resp_lower]
+    file_score = len(found_files) / len(expected_files) if expected_files else 0.0
+    
+    combined_score = (entity_score + file_score) / 2
+    
+    return {
+        "entity_score": entity_score,
+        "file_score": file_score,
+        "combined_score": combined_score,
+        "matched_entities": found_entities,
+        "missed_entities": [e for e in expected_entities if e not in found_entities],
+        "matched_files": found_files,
+        "missed_files": [f for f in expected_files if f not in found_files]
+    }
+
+def main():
+    parser = argparse.ArgumentParser(description="Evaluate Agent Performance")
+    parser.add_argument("--repo", default=".", help="Repo path to index")
+    parser.add_argument("--model", default="qwen2.5-coder:3b", help="Ollama model name")
+    parser.add_argument("--out", default="eval_report.json", help="Output JSON report path")
+    parser.add_argument("--verbose", action="store_true", help="Print detailed results")
+    args = parser.parse_args()
+
+    if args.verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(message)s")
+    else:
+        logging.basicConfig(level=logging.WARNING, format="%(message)s")
+
+    repo_path = os.path.abspath(args.repo)
+    
+    print(f"--- Starting Evaluation on {repo_path} using model {args.model} ---")
+    
+    # Boot sequence
+    print("[1/3] Scanning codebase...")
+    loader = Loader(repo_path)
+    chunks = loader.process_directory()
+    repo_map = RepoMapGenerator().generate_map(chunks)
+    
+    print(f"[2/3] Ingesting {len(chunks)} chunks...")
+    retriever = HybridRetriever()
+    retriever.ingest_chunks(chunks)
+    
+    print(f"[3/3] Initializing agent...")
+    agent = SLMAgent(repo_map_string=repo_map, model=args.model)
+    agent.set_retriever(retriever)
+    
+    results = []
+    total_entity_score = 0.0
+    total_file_score = 0.0
+    total_combined_score = 0.0
+
+    print("\n--- Running Benchmark ---")
+    for i, item in enumerate(BENCHMARK, 1):
+        question = item["question"]
+        expected_entities = item["expected_entities"]
+        expected_files = item["expected_files"]
+        
+        print(f"Q{i}: {question}")
+        response = agent.ask(question)
+        
+        scores = score_response(response, expected_entities, expected_files)
+        
+        res = {
+            "question": question,
+            "response": response,
+            "entity_score": scores["entity_score"],
+            "file_score": scores["file_score"],
+            "combined_score": scores["combined_score"],
+            "expected_entities": expected_entities,
+            "expected_files": expected_files
+        }
+        results.append(res)
+        
+        total_entity_score += scores["entity_score"]
+        total_file_score += scores["file_score"]
+        total_combined_score += scores["combined_score"]
+        
+        if args.verbose:
+            print(f"\nResponse: {response}")
+            print(f"Matched Entities: {scores['matched_entities']}")
+            print(f"Missed Entities: {scores['missed_entities']}")
+            print(f"Matched Files: {scores['matched_files']}")
+            print(f"Missed Files: {scores['missed_files']}")
+            print("-" * 40)
+
+    num_q = len(BENCHMARK)
+    report = {
+        "model": args.model,
+        "repo": repo_path,
+        "timestamp": datetime.now().isoformat(),
+        "overall": {
+            "entity_score": total_entity_score / num_q,
+            "file_score": total_file_score / num_q,
+            "combined_score": total_combined_score / num_q,
+            "questions_evaluated": num_q
+        },
+        "results": results
+    }
+
+    with open(args.out, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2)
+
+    print("\n" + "─" * 41)
+    for i, res in enumerate(results, 1):
+        print(f"Q{i}: {res['combined_score']:.2f} — {res['question']}")
+    
+    print("─" * 41)
+    print(f"Overall combined score: {report['overall']['combined_score']:.2f} / 1.00")
+    print(f"Report saved to {args.out}")
+
+if __name__ == "__main__":
+    main()
+</file>
+
+<file path="eval/hallucination.py">
+import re
+import os
+import sys
+from typing import List, Dict, Set, Optional
+
+# Ensure root path is accessible
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from ingest.metadata import CodeChunk
+
+class HallucinationDetector:
+    IGNORE = {
+        "def", "class", "return", "import", "from", "self", "true",
+        "false", "none", "and", "or", "not", "in", "is", "if", "else",
+        "for", "while", "with", "as", "try", "except", "pass", "print",
+        "str", "int", "float", "list", "dict", "set", "bool", "len",
+        "range", "type"
+    }
+
+    def __init__(self, chunks: List[CodeChunk]):
+        """
+        Builds a known-entity index from the ingested chunks.
+        """
+        self.known_names = set()
+        self.known_qualified = set()
+        self.known_files = set()
+        
+        for chunk in chunks:
+            if chunk.name:
+                self.known_names.add(chunk.name.lower())
+            if chunk.qualified_name:
+                self.known_qualified.add(chunk.qualified_name.lower())
+            if chunk.filepath:
+                self.known_files.add(chunk.filepath.lower())
+                
+        self.known_all = self.known_names.union(self.known_qualified).union(self.known_files)
+
+    def scan(self, response: str) -> Dict:
+        """
+        Scans a response string for Python identifiers and file paths.
+        """
+        # 1. Extract Python identifiers
+        # r'\b[a-zA-Z_][a-zA-Z0-9_]{2,}\b'
+        identifiers = set(re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]{2,}\b', response))
+        
+        verified_entities = []
+        unverified_entities = []
+        
+        for ident in identifiers:
+            ident_lower = ident.lower()
+            if ident_lower in self.IGNORE:
+                continue
+            
+            if ident_lower in self.known_all:
+                verified_entities.append(ident)
+            else:
+                unverified_entities.append(ident)
+                
+        # 2. Extract file path candidates
+        # r'[\w/\\]+\.py'
+        file_candidates = set(re.findall(r'[\w/\\]+\.py', response))
+        
+        verified_files = []
+        unverified_files = []
+        
+        for path in file_candidates:
+            path_lower = path.lower()
+            # Normalize path slashes for comparison if necessary, but here we just lowercase
+            if path_lower in self.known_files:
+                verified_files.append(path)
+            else:
+                unverified_files.append(path)
+                
+        # 3. Calculate score
+        total_extracted = len(unverified_entities) + len(verified_entities) + len(unverified_files) + len(verified_files)
+        unverified_count = len(unverified_entities) + len(unverified_files)
+        
+        score = unverified_count / (total_extracted + 1e-9)
+        
+        if score < 0.2:
+            risk = "low"
+        elif score < 0.5:
+            risk = "medium"
+        else:
+            risk = "high"
+            
+        return {
+            "verified_entities": sorted(verified_entities),
+            "unverified_entities": sorted(unverified_entities),
+            "verified_files": sorted(verified_files),
+            "unverified_files": sorted(unverified_files),
+            "hallucination_risk": risk,
+            "hallucination_score": score
+        }
+
+    def format_report(self, scan_result: Dict) -> str:
+        """
+        Returns a human-readable string summarizing the scan result.
+        """
+        lines = [
+            f"Hallucination Risk: {scan_result['hallucination_risk'].upper()} (score: {scan_result['hallucination_score']:.2f})",
+            f"Verified entities: {', '.join(scan_result['verified_entities']) if scan_result['verified_entities'] else 'None'}",
+            f"Unverified entities: {', '.join(scan_result['unverified_entities']) if scan_result['unverified_entities'] else 'None'}",
+            f"Verified files: {', '.join(scan_result['verified_files']) if scan_result['verified_files'] else 'None'}",
+            f"Unverified files: {', '.join(scan_result['unverified_files']) if scan_result['unverified_files'] else 'None'}"
+        ]
+        return "\n".join(lines)
+
+if __name__ == "__main__":
+    # Self-test
+    test_chunks = [
+        CodeChunk(
+            filepath="rag/retriever.py",
+            chunk_type="class",
+            name="HybridRetriever",
+            qualified_name="HybridRetriever",
+            start_line=1,
+            end_line=10,
+            text="class HybridRetriever: pass"
+        ),
+        CodeChunk(
+            filepath="rag/retriever.py",
+            chunk_type="method",
+            name="ingest_chunks",
+            qualified_name="HybridRetriever.ingest_chunks",
+            start_line=5,
+            end_line=8,
+            text="def ingest_chunks(self): pass"
+        ),
+        CodeChunk(
+            filepath="ingest/loader.py",
+            chunk_type="function",
+            name="load_repo",
+            qualified_name="load_repo",
+            start_line=1,
+            end_line=5,
+            text="def load_repo(): pass"
+        )
+    ]
+    
+    detector = HallucinationDetector(test_chunks)
+    
+    test_response = "The HybridRetriever class uses ingest_chunks to process data from fake_module.py and calls UnknownClass."
+    scan = detector.scan(test_response)
+    
+    assert "HybridRetriever" in scan["verified_entities"]
+    assert "ingest_chunks" in scan["verified_entities"]
+    assert "UnknownClass" in scan["unverified_entities"]
+    assert "fake_module.py" in scan["unverified_files"]
+    assert "rag/retriever.py" not in scan["unverified_files"]
+    
+    print(detector.format_report(scan))
+    print("HallucinationDetector OK")
+</file>
+
+<file path="repomix.config.json">
+{
+  "output": {
+    "filePath": "repomix-output.txt",
+    "style": "xml",
+    "removeComments": false,
+    "removeEmptyLines": false,
+    "topFilesLength": 5,
+    "showLineNumbers": false,
+    "copyToClipboard": false,
+    "includeEmptyDirectories": false
+  },
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      "repomix-output.txt",
+      "repomix-output.xml",
+      "*.pyc",
+      "__pycache__",
+      ".git",
+      ".venv",
+      "qdrant_storage",
+      "fastembed_cache",
+      "scratch"
+    ]
+  }
+}
+</file>
+
+<file path="requirements-dev.txt">
+-r requirements.txt
+pytest>=8.0.0
+pytest-cov>=5.0.0
+ruff>=0.4.0
+</file>
+
+<file path="requirements-train.txt">
+# WARNING: Requires NVIDIA GPU with CUDA 12.1+ and 6GB+ VRAM.
+# Install with: pip install -r requirements-train.txt
+# unsloth is installed from source -- do not use PyPI version.
+
+-r requirements.txt
+torch>=2.3.0
+transformers>=4.46.0,<4.48.0
+peft>=0.14.0,<0.15.0
+trl>=0.13.0,<0.14.0
+accelerate>=0.33.0,<0.34.0
+bitsandbytes>=0.43.0,<0.44.0
+datasets>=3.0.0,<4.0.0
+unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git
+</file>
+
+<file path="data/dep_graph.py">
+import ast
+import grimp
+from collections import defaultdict
+import os
+import tempfile
+from typing import Optional
+
+class IntraFileVisitor(ast.NodeVisitor):
+    def __init__(self):
+        self.calls = []
+        self.inherits = []
+        self.defines = []
+        self._stack = []
+
+    def visit_ClassDef(self, node):
+        self._stack.append(node.name)
+        self.defines.append((".".join(self._stack), "class", node.lineno))
+        for base in node.bases:
+            if isinstance(base, ast.Name):
+                self.inherits.append((".".join(self._stack), base.id))
+            elif isinstance(base, ast.Attribute):
+                self.inherits.append((".".join(self._stack), ast.unparse(base)))
+        self.generic_visit(node)
+        self._stack.pop()
+
+    def visit_FunctionDef(self, node):
+        self._stack.append(node.name)
+        self.defines.append((".".join(self._stack), "function", node.lineno))
+        self.generic_visit(node)
+        self._stack.pop()
+        
+    def visit_AsyncFunctionDef(self, node):
+        self._stack.append(node.name)
+        self.defines.append((".".join(self._stack), "async_function", node.lineno))
+        self.generic_visit(node)
+        self._stack.pop()
+
+    def visit_Call(self, node):
+        callee = ast.unparse(node.func) if hasattr(ast, "unparse") else None
+        if self._stack and callee:
+            self.calls.append((".".join(self._stack), callee))
+        self.generic_visit(node)
+
+
+class DependencyGraph:
+    def __init__(self, pkg_name: str, pkg_dir: str):
+        self.pkg_name = pkg_name
+        self.pkg_dir = os.path.abspath(pkg_dir)
+        self.intra_file_deps = defaultdict(lambda: {"calls": [], "inherits": [], "defines": []})
+        self.module_graph = None
+
+    def build(self):
+        """Builds both the inter-module graph via grimp and the intra-module relations via AST."""
+        try:
+            self.module_graph = grimp.build_graph(self.pkg_name, include_external_packages=False)
+        except Exception as e:
+            print(f"Failed to build grimp graph for {self.pkg_name}: {e}")
+            
+        try:
+            if not os.path.exists(self.pkg_dir):
+                print(f"Warning: pkg_dir {self.pkg_dir} does not exist.")
+                return
+
+            for root, _, files in os.walk(self.pkg_dir):
+                for file in files:
+                    if file.endswith(".py"):
+                        filepath = os.path.join(root, file)
+                        self._parse_intra_file(filepath)
+        except Exception as e:
+            print(f"Warning: Failed to walk directory {self.pkg_dir}: {e}")
+                    
+    def _parse_intra_file(self, filepath: str):
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                source = f.read()
+            tree = ast.parse(source)
+            visitor = IntraFileVisitor()
+            visitor.visit(tree)
+            
+            self.intra_file_deps[filepath] = {
+                "calls": visitor.calls,
+                "inherits": visitor.inherits,
+                "defines": visitor.defines
+            }
+        except SyntaxError:
+            pass # Ignore malformed files for the intra-file graph
+
+    def get_chunk_deps(self, filepath: str, chunk_name: str, parent_class: Optional[str] = None):
+        """Returns dependency info for a specific chunk name within a file."""
+        qualified_name = f"{parent_class}.{chunk_name}" if parent_class else chunk_name
+        deps = {"calls_to": [], "called_by": [], "inherits_from": [], "imported_by": []}
+        
+        # Intra-file edges
+        file_data = self.intra_file_deps.get(filepath, {})
+        for caller, callee in file_data.get("calls", []):
+            if caller == qualified_name:
+                # Strip the qualifying prefix (e.g. "self.baz" -> "baz") before returning
+                deps["calls_to"].append(callee.split(".")[-1])
+            if callee == qualified_name:
+                deps["called_by"].append(caller)
+                
+        for child, base in file_data.get("inherits", []):
+            if child == qualified_name:
+                deps["inherits_from"].append(base)
+                
+        # Inter-file edges via grimp
+        if self.module_graph:
+            # We must map filepath to a module name for grimp
+            try:
+                # Calculate relative path from the parent of the package directory
+                # so that the top-level package name is included in the module path.
+                rel_path = os.path.relpath(filepath, start=os.path.dirname(self.pkg_dir))
+                module_name = rel_path.replace(os.path.sep, ".").replace(".py", "")
+                if module_name.endswith(".__init__"):
+                    module_name = module_name[:-9]
+                
+                # Check what modules import this module
+                imported_by = self.module_graph.find_modules_directly_imported_by(module_name)
+                # Not a perfect 1:1 chunk mapping, but gives file-level context
+                deps["imported_by"] = list(imported_by)
+            except Exception:
+                pass
+                
+        return deps
+
+def test_dep_graph():
+    source = """
+class Foo:
+    def bar(self):
+        self.baz()
+    
+    def baz(self):
+        pass
+"""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmpdir:
+        filepath = os.path.join(tmpdir, "temp_test.py")
+        with open(filepath, "w") as f:
+            f.write(source)
+        graph = DependencyGraph(pkg_name="non_existent_pkg_123", pkg_dir=tmpdir)
+        graph.build()
+        graph._parse_intra_file(filepath)
+        deps = graph.get_chunk_deps(filepath, "bar", parent_class="Foo")
+        calls = deps["calls_to"]
+        assert "baz" in calls or "self.baz" in calls, f"Expected baz in {calls}"
+        print("DepGraph OK")
+
+if __name__ == "__main__":
+    test_dep_graph()
+</file>
+
+<file path="data/synth.py">
+import json
+import os
+from openai import OpenAI
+from ingest.loader import Loader
+from data.dep_graph import DependencyGraph
+
+TEACHER_SYSTEM = """You generate Q&A training pairs for a code-understanding model.
+The target model is Qwen2.5-Coder-3B; generate answers calibrated for a smaller model: shorter, more explicit, and step-by-step rather than assuming implicit reasoning.
+Given a Python code chunk and structured facts about its relationships in a repo,
+produce 3 diverse natural-language Q&A pairs. Vary phrasing: some lookup-style
+("where is X defined?"), some semantic ("what does X do?"), some multi-hop
+("how do A and B interact?"). Return JSONL format only, keys 'question' and 'answer'.
+Ground every answer in the provided code; if unsupported, refuse."""
+
+def generate_synthetic_data(repo_root: str, output_file: str, model: str = "gpt-4o"):
+    print(f"Loading repo from {repo_root}...")
+    loader = Loader(repo_root)
+    chunks = loader.process_directory()
+    
+    print(f"Building dependency graph...")
+    # Passing the repo root folder name or '.' if we're inside it
+    pkg_dir = os.path.abspath(repo_root)
+    pkg_name = os.path.basename(pkg_dir)
+    graph = DependencyGraph(pkg_name=pkg_name, pkg_dir=pkg_dir)
+    graph.build()
+    
+    # Initialize teacher LLM (requires OPENAI_API_KEY if using OpenAI, or configure local base_url)
+    try:
+        client = OpenAI()
+    except Exception as e:
+        print(f"Failed to initialize OpenAI client: {e}. Ensure OPENAI_API_KEY is set.")
+        return
+        
+    print(f"Generating Q&A for {len(chunks)} chunks using {model}...")
+    
+    with open(output_file, "w", encoding="utf-8") as out:
+        for chunk in chunks:
+            deps = graph.get_chunk_deps(chunk.filepath, chunk.name, chunk.parent_class)
+            
+            prompt_content = (
+                f"<chunk path={chunk.filepath} name={chunk.name}>\n"
+                f"{chunk.text}\n"
+                f"</chunk>\n"
+                f"<calls_to>{deps['calls_to']}</calls_to>\n"
+                f"<called_by>{deps['called_by']}</called_by>\n"
+                f"<inherits>{deps['inherits_from']}</inherits>\n"
+                f"<imported_by>{deps['imported_by']}</imported_by>"
+            )
+            
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": TEACHER_SYSTEM},
+                        {"role": "user", "content": prompt_content}
+                    ],
+                    temperature=0.7
+                )
+                
+                output = response.choices[0].message.content
+                # Write conversational JSONL format as preferred for TRL
+                for line in output.split('\n'):
+                    if line.strip().startswith('{'):
+                        try:
+                            qa = json.loads(line)
+                            if 'question' in qa and 'answer' in qa:
+                                out.write(json.dumps({
+                                    "messages": [
+                                        {"role": "system", "content": "You are a Python code understanding assistant."},
+                                        {"role": "user", "content": qa['question']},
+                                        {"role": "assistant", "content": qa['answer']}
+                                    ]
+                                }) + '\n')
+                        except Exception:
+                            pass
+            except Exception as e:
+                print(f"Failed generation for {chunk.name}: {e}")
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--repo", default=".")
+    parser.add_argument("--out", default="synthetic_qa.jsonl")
+    parser.add_argument("--model", default="gpt-4o", help="Teacher LLM model name.")
+    args = parser.parse_args()
+    generate_synthetic_data(args.repo, args.out, model=args.model)
+</file>
+
+<file path="model/inference.py">
+from openai import OpenAI
+from typing import List, Dict, Any
+import time
+
+class LocalInferenceEngine:
+    """
+    Wraps a locally-running Ollama model for direct (non-agent) inference.
+    Used for batch evaluation and output sampling during DPO data collection.
+    """
+    def __init__(self, base_url: str = "http://localhost:11434/v1",
+                 model: str = "qwen2.5-coder:3b"):
+        self.client = OpenAI(
+            base_url=base_url,
+            api_key="ollama-local" # any string works for ollama
+        )
+        self.model = model
+
+    def generate(self, prompt: str, system: str = "", temperature: float = 0.2,
+                 max_tokens: int = 512) -> str:
+        """Single completion. Returns the assistant content string."""
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Inference Error: {e}")
+            return None
+
+    def batch_generate(self, prompts: List[str], system: str = "",
+                       temperature: float = 0.2, max_tokens: int = 512,
+                       show_progress: bool = True) -> List[str]:
+        """
+        Runs generate() for each prompt sequentially.
+        If show_progress=True, prints 'Processing N/total' every 10 items.
+        Returns list of response strings, with None for any failed call.
+        """
+        results = []
+        total = len(prompts)
+        for i, prompt in enumerate(prompts):
+            res = self.generate(prompt, system, temperature, max_tokens)
+            results.append(res)
+            
+            if show_progress and (i + 1) % 10 == 0:
+                print(f"Processing {i + 1}/{total}")
+        
+        return results
+
+    def evaluate_on_humaneval_subset(self, problems: List[Dict]) -> Dict:
+        """
+        Accepts a list of dicts with keys 'prompt' and 'canonical_solution'.
+        For each, generates a completion and checks if the generated code
+        contains the function name from the canonical solution (weak proxy metric).
+        Returns {"total": N, "name_match": K, "name_match_rate": K/N}.
+        """
+        total = len(problems)
+        matches = 0
+        
+        print(f"Evaluating on {total} HumanEval-style problems...")
+        
+        for problem in problems:
+            prompt = problem.get("prompt", "")
+            canonical = problem.get("canonical_solution", "")
+            
+            # Extract function name from canonical solution (simple heuristic)
+            # Typically 'def function_name(...):'
+            func_name = "unknown"
+            if "def " in canonical:
+                func_name = canonical.split("def ")[1].split("(")[0].strip()
+            
+            response = self.generate(prompt)
+            
+            if response and func_name in response:
+                matches += 1
+        
+        rate = matches / total if total > 0 else 0
+        return {
+            "total": total,
+            "name_match": matches,
+            "name_match_rate": rate
+        }
+
+    def health_check(self) -> bool:
+        """
+        Pings the Ollama server. Returns True if reachable and model is loaded,
+        False otherwise. Prints a human-readable status line.
+        """
+        try:
+            # Pinging models list to check connectivity
+            models_response = self.client.models.list()
+            available_models = [m.id for m in models_response.data]
+            
+            if self.model in available_models:
+                print(f"Health Check: OK | Ollama reachable, model '{self.model}' is loaded.")
+                return True
+            else:
+                print(f"Health Check: WARNING | Ollama reachable, but model '{self.model}' not found in {available_models}.")
+                return False
+        except Exception as e:
+            print(f"Health Check: FAILED | Could not connect to Ollama at {self.client.base_url}. Error: {e}")
+            return False
+
+if __name__ == "__main__":
+    # Test block
+    engine = LocalInferenceEngine()
+    
+    if engine.health_check():
+        test_prompt = "Write a Python function that reverses a linked list."
+        print(f"\nPrompt: {test_prompt}\n")
+        response = engine.generate(test_prompt)
+        print(f"Response:\n{response}")
+    else:
+        print("\nExiting due to failed health check. Ensure Ollama is running.")
+</file>
+
+<file path=".gitignore">
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+venv/
+.venv/
+env/
+.env
+ENV/
+env.bak/
+venv.bak/
+
+# Environment Variables
+.env
+.env.local
+
+# IDEs / Editor cache
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing and Coverage
+.coverage
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+pytestdebug.log
+
+# Project specific
+qdrant_storage/
+fastembed_cache/
+</file>
+
+<file path="LICENSE">
+MIT License
+
+Copyright (c) 2026 ValentinNimigean
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+</file>
+
+<file path="model/agent.py">
+import json
+import logging
+from openai import OpenAI
+from model.tools import AgentTools
+from eval.hallucination import HallucinationDetector
+from ingest.metadata import CodeChunk
+from typing import List
+
+logger = logging.getLogger(__name__)
+
+class SLMAgent:
+    def __init__(self, repo_map_string: str = "", base_url: str = "http://localhost:11434/v1", model: str = "qwen2.5-coder:3b", hallucination_check: bool = False):
+        """
+        Initializes the SLM Agent pointing to a local Ollama server by default.
+        """
+        self.client = OpenAI(
+            base_url=base_url,
+            api_key="ollama-local" # any string works for ollama
+        )
+        self.model = model
+        self.repo_map = repo_map_string
+        self.retriever = None
+        self.hallucination_check = hallucination_check
+        self._chunks = []
+        self._detector = None
+
+    def set_retriever(self, retriever):
+        self.retriever = retriever
+
+    def set_chunks(self, chunks: List[CodeChunk]):
+        self._chunks = chunks
+        if self.hallucination_check:
+            self._detector = HallucinationDetector(chunks)
+
+    def _execute_tool(self, tool_call) -> str:
+        name = tool_call.function.name
+        try:
+            args = json.loads(tool_call.function.arguments)
+        except Exception:
+            args = {}
+            
+        logger.debug(f"\n[Agent Action] Executing Tool: {name} | Args: {args}")
+        
+        if name == "grep_search":
+            return AgentTools.grep_search(args.get("pattern", ""))
+        elif name == "semantic_search":
+            if not self.retriever:
+                return "Error: Retriever not attached to agent."
+            results = self.retriever.search(args.get("query", ""), limit=3)
+            # Simplify output so SLM doesn't get overwhelmed with vectors
+            formatted = []
+            for res in results:
+                formatted.append(f"File: {res['metadata']['filepath']} | Name: {res['metadata']['name']}\nCode Snippet:\n{res['document']}")
+            return "\n\n".join(formatted)
+            
+        return "Tool not recognized."
+
+    def ask(self, user_prompt: str, max_turns: int = 8) -> str:
+        logger.debug(f"\n[Agent] Thinking about: {user_prompt}")
+        messages = [
+            {
+                "role": "system",
+                "content": f"You are a Python Expert Assistant. You have tools to explore code.\nHere is the exact repository layout:\n{self.repo_map}\n\nUse semantic_search for concepts, and grep_search for exact names. Always explain what you find."
+            },
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        tools = AgentTools.get_tool_schemas()
+        
+        try:
+            for _ in range(max_turns):
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="auto"
+                )
+                
+                msg = response.choices[0].message
+                msg_dict = msg.model_dump()
+                messages.append({k: v for k, v in msg_dict.items() if v is not None or k == "content"})
+                
+                # If the model didn't call any tools, we are done
+                if not msg.tool_calls:
+                    final_content = msg.content
+                    if self._detector is not None:
+                        scan = self._detector.scan(final_content)
+                        logger.debug(self._detector.format_report(scan))
+                        if scan["hallucination_risk"] == "high":
+                            warning = f"\n\n⚠️ Hallucination Warning: {len(scan['unverified_entities'])} unverified entities detected: {scan['unverified_entities']}"
+                            return final_content + warning
+                    return final_content
+                
+                # If it did call tools, execute them
+                for tool_call in msg.tool_calls:
+                    tool_result = self._execute_tool(tool_call)
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": tool_call.function.name,
+                        "content": str(tool_result)
+                    })
+                    
+                logger.debug(f"[Agent] Tool results gathered. Sending back for reasoning...")
+            
+            return f"Agent exceeded maximum turns ({max_turns}) without reaching a final answer."
+            
+        except Exception as e:
+            return f"Agent Execution Error: {e}\n(Make sure Ollama is running: 'ollama run qwen2.5-coder:3b' at {self.client.base_url})"
+</file>
+
+<file path="model/dpo.py">
+"""
+Phase 3: DPO (Direct Preference Optimization) Template
+Used to mathematically rank outputs to reduce hallucination.
+Run after SFT. Requires preference_data.jsonl from data/pref_gen.py.
+
+WARNING: Requires 6GB+ NVIDIA VRAM. Do not execute on consumer ultra-books.
+"""
+
+import torch
+try:
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from peft import LoraConfig, get_peft_model
+    from trl import DPOTrainer, DPOConfig
+    from datasets import load_dataset
+except ImportError:
+    print("Warning: Missing DPO dependencies. Make sure trl and datasets are installed.")
+
+def run_dpo(model_id="Qwen/Qwen2.5-Coder-3B-Instruct", dpo_data_path="preference_data.jsonl", output_dir="dpo_results"):
+    print("Initializing DPO RLHF Pipeline...")
+    
+    # 1. Load Model
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = "<|fim_pad|>"
+        
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id, 
+        device_map="auto",
+        torch_dtype=torch.bfloat16
+    )
+
+    # 2. Setup LoRA (Apply RLHF efficiently)
+    peft_config = LoraConfig(
+        r=32,
+        lora_alpha=64,
+        lora_dropout=0.05,
+        bias="none",
+        task_type="CAUSAL_LM",
+        target_modules=["q_proj", "v_proj"]
+    )
+    
+    # Do not call get_peft_model here, let DPOTrainer handle it.
+
+    # 3. Load Preference Data
+    # DPO requires 3 columns: "prompt", "chosen" (good code), "rejected" (hallucinations)
+    print(f"Loading preference dataset from {dpo_data_path}...")
+    dataset = load_dataset("json", data_files=dpo_data_path, split="train")
+    
+    # 4. Configure DPO Trainer using DPOConfig (TRL 0.25+)
+    dpo_cfg = DPOConfig(
+        output_dir=output_dir,
+        per_device_train_batch_size=2,
+        gradient_accumulation_steps=8,
+        learning_rate=5e-6,
+        logging_steps=10,
+        max_steps=200,
+        remove_unused_columns=False,
+        optim="paged_adamw_8bit",
+        beta=0.1, # KL penalty constraint (determines how far it can deviate from ref)
+        max_length=1024,
+        max_prompt_length=512,
+        loss_type="sigmoid",
+        truncation_mode="keep_end",
+        bf16=True,
+    )
+
+    dpo_trainer = DPOTrainer(
+        model=model,
+        ref_model=None, # ref_model=None is explicitly supported and recommended with PEFT
+        args=dpo_cfg,
+        train_dataset=dataset,
+        processing_class=tokenizer,
+        peft_config=peft_config,
+    )
+
+    if torch.cuda.is_available():
+        dpo_trainer.train()
+        dpo_trainer.save_model(f"{output_dir}/adapter")
+    else:
+        raise EnvironmentError("CUDA GPU required for DPO. Aborting.")
+
+if __name__ == "__main__":
+    print("DPO Module imported. Run run_dpo() when dataset is compiled.")
+</file>
+
+<file path="model/finetune.py">
+"""
+Phase 2: QLoRA Fine-Tuning. Run after generating synthetic_qa.jsonl.
+
+WARNING: 
+Executing this script on a machine without a dedicated CUDA GPU (Nvidia) 
+with at least 4-6GB of VRAM will crash your system due to Out-Of-Memory errors.
+It is highly recommended to run this on a cloud instance with an A10 or A100.
+"""
+
+import os
+import torch
+import argparse
+
+try:
+    from unsloth import FastLanguageModel
+    from trl import SFTTrainer, SFTConfig
+    from datasets import load_dataset
+except ImportError:
+    print("Warning: Fine-tuning libraries not fully installed. Make sure to pip install unsloth trl datasets.")
+
+def run_finetuning(model_id="unsloth/Qwen2.5-Coder-3B-Instruct-bnb-4bit", dataset_path="synthetic_qa.jsonl", output_dir="results", dry_run=False, epochs=4):
+    print(f"Loading Base Model: {model_id} via Unsloth...")
+    
+    # Load model and tokenizer via Unsloth
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name=model_id,
+        max_seq_length=2048,
+        dtype=None,
+        load_in_4bit=True,
+    )
+
+    # Do NOT leave pad_token as <|endoftext|> for Qwen
+    if tokenizer.pad_token == "<|endoftext|>" or tokenizer.pad_token is None:
+        tokenizer.pad_token = "<|fim_pad|>"
+    
+    # Ensure EOS token is correctly set for Qwen
+    tokenizer.eos_token = "<|im_end|>"
+
+    # Prepare for LoRA
+    model = FastLanguageModel.get_peft_model(
+        model,
+        r=32,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                        "gate_proj", "up_proj", "down_proj"],
+        lora_alpha=64,
+        lora_dropout=0.0, # Unsloth optimizes for 0 dropout
+        bias="none",
+        use_gradient_checkpointing="unsloth",
+        random_state=3407,
+    )
+    print(f"Trainable parameters set up for Unsloth.")
+
+    print(f"Loading Dataset: {dataset_path}...")
+    # Load the JSONL dataset generated by data/synth.py
+    dataset = load_dataset("json", data_files=dataset_path, split="train")
+
+    # Apply the tokenizer's chat template to the "messages" column
+    def formatting_prompts_func(examples):
+        texts = [tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False) for messages in examples["messages"]]
+        return {"text": texts}
+    
+    dataset = dataset.map(formatting_prompts_func, batched=True)
+    dataset = dataset.remove_columns(["messages"])
+
+    if dry_run:
+        print("\n--- DRY RUN: Printing first 3 formatted rows ---")
+        for i in range(min(3, len(dataset))):
+            print(f"\nRow {i+1}:\n{dataset[i]['text']}")
+        print("\nDry run complete. Exiting without training.")
+        return
+
+    cfg = SFTConfig(
+        output_dir=output_dir,
+        num_train_epochs=epochs,
+        per_device_train_batch_size=4,
+        gradient_accumulation_steps=8,
+        learning_rate=2e-4,
+        bf16=True, 
+        logging_steps=10, 
+        save_strategy="epoch",
+        max_seq_length=2048,
+        packing=False,
+    )
+
+    trainer = SFTTrainer(
+        model=model, 
+        args=cfg,
+        train_dataset=dataset,
+        dataset_text_field="text",
+        processing_class=tokenizer,
+    )
+
+    print("Starting QLoRA Training...")
+    if torch.cuda.is_available():
+        trainer.train()
+    else:
+        raise EnvironmentError("CUDA GPU required for training. Aborting.")
+    
+    print(f"Saving LoRA adapter to {output_dir}/adapter...")
+    model.save_pretrained(f"{output_dir}/adapter")
+    tokenizer.save_pretrained(f"{output_dir}/adapter")
+    
+    # GGUF saving requires llama.cpp to be installed - keeping commented
+    # model.save_pretrained_gguf(f"{output_dir}/gguf", tokenizer, quantization_method="q4_k_m")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run QLoRA fine-tuning for Python code understanding.")
+    parser.add_argument("--model", type=str, default="unsloth/Qwen2.5-Coder-3B-Instruct-bnb-4bit", help="Base model ID")
+    parser.add_argument("--data", type=str, default="synthetic_qa.jsonl", help="Path to JSONL dataset")
+    parser.add_argument("--out", type=str, default="results", help="Output directory")
+    parser.add_argument("--epochs", type=int, default=4, help="Number of training epochs")
+    parser.add_argument("--dry-run", action="store_true", help="Format and print data without training")
+    
+    args = parser.parse_args()
+    
+    run_finetuning(
+        model_id=args.model,
+        dataset_path=args.data,
+        output_dir=args.out,
+        dry_run=args.dry_run,
+        epochs=args.epochs
+    )
+</file>
+
+<file path="model/tools.py">
+import json
+import logging
+import os
+import re
+from typing import List, Dict, Any
+
+logger = logging.getLogger(__name__)
+
+class AgentTools:
+    """
+    A collection of tools that the SLM can call.
+    """
+    SEARCHABLE_EXTENSIONS = {".py", ".md", ".toml", ".cfg", ".yaml", ".yml", ".json", ".txt"}
+    
+    @staticmethod
+    def get_tool_schemas() -> List[Dict[str, Any]]:
+        """
+        Returns the OpenAI format JSON schemas for the agent tools.
+        """
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "grep_search",
+                    "description": "Searches the codebase for exact string matches or regex patterns. Use this to find specific variables, function definitions, or imports that are not caught by semantic search.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "pattern": {
+                                "type": "string",
+                                "description": "The string or regex pattern to search for."
+                            },
+                            "directory": {
+                                "type": "string",
+                                "description": "The directory to search inside (default is '.')."
+                            }
+                        },
+                        "required": ["pattern"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "semantic_search",
+                    "description": "Queries the Qdrant Hybrid Retriever to find the most conceptually relevant functions or classes based on natural language.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "The natural language query describing what logic you are looking for."
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            }
+        ]
+
+    @staticmethod
+    def grep_search(pattern: str, directory: str = ".") -> str:
+        """
+        Executes a local grep (or equivalent python implementation) to find literal matches.
+        """
+        # Validate regex pattern
+        try:
+            re.compile(pattern)
+        except re.error as e:
+            return f"Invalid regex pattern: {e}"
+
+        try:
+            results = []
+            for root, _, files in os.walk(directory):
+                if '.git' in root or '__pycache__' in root or 'venv' in root:
+                    continue
+                for file in files:
+                    ext = os.path.splitext(file)[1]
+                    if ext in AgentTools.SEARCHABLE_EXTENSIONS:
+                        filepath = os.path.join(root, file)
+                        try:
+                            with open(filepath, 'r', encoding='utf-8') as f:
+                                lines = f.readlines()
+                                for i, line in enumerate(lines):
+                                    if re.search(pattern, line):
+                                        results.append(f"{filepath}:{i+1}:{line.strip()}")
+                        except Exception as e:
+                            logger.debug(f"Could not read {filepath}: {e}")
+            
+            if not results:
+                return "No matches found."
+            
+            if len(results) > 50:
+                truncation_note = f"\n[Truncated: showing 50 of {len(results)} matches]"
+            else:
+                truncation_note = ""
+                
+            return "\n".join(results[:50]) + truncation_note
+            
+        except Exception as e:
+            return f"Error executing search: {str(e)}"
+</file>
+
+<file path="rag/repo_map.py">
+from typing import List
+from collections import defaultdict
+from ingest.metadata import CodeChunk
+
+class RepoMapGenerator:
+    def __init__(self):
+        pass
+
+    def generate_map(self, chunks: List[CodeChunk]) -> str:
+        """
+        Creates a bird's eye view string representation of the repository.
+        """
+        # Group by file path
+        file_tree = defaultdict(list)
+        for chunk in chunks:
+            file_tree[chunk.filepath].append(chunk)
+
+        repo_map_lines = ["Repository Map:", "================="]
+
+        # Sort files alphabetically
+        for filepath in sorted(file_tree.keys()):
+            repo_map_lines.append(f"\n[-] {filepath}")
+            file_chunks = file_tree[filepath]
+            
+            # Sort chunks by start line to keep logical order
+            file_chunks.sort(key=lambda x: x.start_line)
+
+            for chunk in file_chunks:
+                if chunk.chunk_type == "class":
+                    repo_map_lines.append(f"  [C] Class: {chunk.name} (Lines {chunk.start_line}-{chunk.end_line})")
+                elif chunk.chunk_type == "method":
+                    repo_map_lines.append(f"    [m] Method: {chunk.name} (Lines {chunk.start_line}-{chunk.end_line})")
+                elif chunk.chunk_type == "function":
+                    repo_map_lines.append(f"  [F] Function: {chunk.name} (Lines {chunk.start_line}-{chunk.end_line})")
+
+        return "\n".join(repo_map_lines)
+</file>
+
+<file path="ui/app.py">
+import sys
+import os
+import streamlit as st
+
+# Ensure root path is accessible when running from ui/
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from ingest.loader import Loader
+from rag.repo_map import RepoMapGenerator
+from rag.retriever import HybridRetriever
+from model.agent import SLMAgent
+
+# Set Page Configuration for maximum width and title
+st.set_page_config(page_title="SLM Code Assistant", page_icon="code", layout="wide")
+
+# Inject Custom Framework CSS for "Glassmorphic" Premium UI
+st.markdown("""
+<style>
+    /* Dark Premium Base */
+    .stApp {
+        background-color: #0d1117;
+        color: #c9d1d9;
+        font-family: 'Inter', -apple-system, sans-serif;
+    }
+    
+    /* Subtle Sidebar styling */
+    .stSidebar {
+        background-color: #161b22 !important;
+        border-right: 1px solid #30363d;
+    }
+    
+    /* Chat bubbles: Assistant */
+    .stChatMessage {
+        border-radius: 12px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        background-color: #21262d;
+        border: 1px solid rgba(240, 246, 252, 0.1);
+        backdrop-filter: blur(10px);
+        transition: transform 0.2s;
+    }
+    
+    /* Chat bubbles: User */
+    .stChatMessage[data-testid="stChatMessage-user"] {
+        background-color: rgba(31, 111, 235, 0.1);
+        border: 1px solid rgba(31, 111, 235, 0.3);
+    }
+
+    h1, h2, h3 {
+        color: #58a6ff;
+        font-weight: 600;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Initialize session state
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "target_repo" not in st.session_state:
+    st.session_state.target_repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Render dynamic Sidebar settings first
+with st.sidebar:
+    st.header("Settings")
+    new_repo = st.text_input("Local Repository Path", value=st.session_state.target_repo, help="The absolute path to the Python project you want to analyze.")
+    
+    if new_repo != st.session_state.target_repo:
+        st.session_state.target_repo = new_repo
+        st.cache_resource.clear()
+        st.session_state.messages = []
+        st.rerun()
+
+    if not os.path.isdir(st.session_state.target_repo):
+        st.warning(f"Directory not found: {st.session_state.target_repo}")
+        st.stop()
+
+# Cache the heavy resource loading
+@st.cache_resource
+def load_backend(repo_path):
+    loader = Loader(repo_path)
+    chunks = loader.process_directory()
+    repo_map_gen = RepoMapGenerator()
+    repo_map_string = repo_map_gen.generate_map(chunks)
+    
+    retriever = HybridRetriever()
+    retriever.ingest_chunks(chunks)
+    
+    # Init Agent
+    agent = SLMAgent(repo_map_string=repo_map_string, hallucination_check=True)
+    agent.set_retriever(retriever)
+    agent.set_chunks(chunks)
+    
+    return agent, repo_map_string, chunks
+
+st.title("Python SLM Agent Assistant")
+st.caption("powered by Qwen2.5-Coder-3B (Local via Ollama) & Hybrid Qdrant Search")
+
+with st.spinner(f"Analyzing {st.session_state.target_repo} and Booting Agent..."):
+    agent, repo_map, chunks = load_backend(st.session_state.target_repo)
+
+# Render dynamic Sidebar
+with st.sidebar:
+    st.header("Repository Map")
+    st.success(f"{len(chunks)} Logical Chunks Extracted via AST")
+    
+    with st.expander("View Full Map", expanded=True):
+        st.code(repo_map, language="markdown")
+        
+    st.divider()
+    st.info("The SLM Agent (qwen2.5-coder:3b) has autonomous access to Semantic Search and Exact-Match Grep. It connects via local Ollama API on port 11434.")
+
+# Initialize Chat Memory
+# Render chat history
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# User Input Logic
+if prompt := st.chat_input("Ask a question about the codebase... (e.g. 'How does AST chunking work?')"):
+    # Append to state and UI
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # Process Agent response
+    with st.chat_message("assistant"):
+        with st.spinner("Agent is exploring tools and thinking..."):
+            try:
+                response = agent.ask(prompt)
+                st.markdown(response)
+                st.session_state.messages.append({"role": "assistant", "content": response})
+            except Exception as e:
+                error_msg = f"**Connection Failed.** Please make sure your local Ollama daemon is running with `ollama run qwen2.5-coder:3b`.\n\n*Error Detail: {e}*"
+                st.error(error_msg)
+                st.session_state.messages.append({"role": "assistant", "content": error_msg})
+</file>
+
+<file path="ui/cli.py">
+import sys
+import os
+import logging
+
+# Ensure root path is accessible when running from ui/
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from ingest.loader import Loader
+from rag.repo_map import RepoMapGenerator
+from rag.retriever import HybridRetriever
+from model.agent import SLMAgent
+
+import argparse
+
+def run_cli():
+    logging.basicConfig(level=logging.DEBUG, format="%(name)s | %(message)s")
+    parser = argparse.ArgumentParser(description="SLM Agent CLI Interface")
+    parser.add_argument("--repo", default=".", help="Path to the Python repo to analyze.")
+    args = parser.parse_args()
+
+    repo_path = os.path.abspath(args.repo)
+    if not os.path.isdir(repo_path):
+        print(f"Error: {repo_path} is not a valid directory.")
+        sys.exit(1)
+
+    print(f"--- SLM Agent CLI Interface: Analyzing {repo_path} ---")
+    
+    print("[1/3] Scanning codebase and parsing AST...")
+    loader = Loader(repo_path)
+    chunks = loader.process_directory()
+    repo_map = RepoMapGenerator().generate_map(chunks)
+    
+    print(f"[2/3] Ingesting {len(chunks)} logic chunks into Hybrid Qdrant...")
+    retriever = HybridRetriever()
+    retriever.ingest_chunks(chunks)
+    
+    print("[3/3] Booting Local Agent... (qwen2.5-coder:3b via Ollama)")
+    agent = SLMAgent(repo_map_string=repo_map, hallucination_check=True)
+    agent.set_retriever(retriever)
+    agent.set_chunks(chunks)
+    
+    print("\n[READY] Start asking questions about your codebase.")
+    print("Type 'exit' to quit.\n")
+    
+    while True:
+        try:
+            query = input("You> ")
+            if query.strip().lower() in ['exit', 'quit']:
+                break
+            if not query.strip():
+                continue
+                
+            response = agent.ask(query)
+            print(f"\nAgent> {response}\n")
+            
+        except KeyboardInterrupt:
+            print("\nExiting CLI.")
+            break
+        except Exception as e:
+            print(f"\n[System Error]: {e}")
+
+if __name__ == "__main__":
+    run_cli()
+</file>
+
+<file path="main.py">
+import os
+import sys
+import logging
+from ingest.loader import Loader
+from rag.repo_map import RepoMapGenerator
+from rag.retriever import HybridRetriever
+from model.agent import SLMAgent
+
+import argparse
+
+def main():
+    logging.basicConfig(level=logging.DEBUG, format="%(name)s | %(message)s")
+    parser = argparse.ArgumentParser(description="SLM Agent Demo")
+    parser.add_argument("--repo", default=".", help="Path to the Python repo to analyze.")
+    parser.add_argument("--question", default="What tool functions are available in the repository? Please grep for def grep_search.", help="Question for the agent.")
+    args = parser.parse_args()
+
+    repo_path = os.path.abspath(args.repo)
+    if not os.path.isdir(repo_path):
+        print(f"Error: {repo_path} is not a valid directory.")
+        sys.exit(1)
+
+    # --- PHASE 1 ---
+    print(f"\n[PHASE 1] Extracting AST Chunks from {repo_path} & Generating Repo Map...")
+    loader = Loader(repo_path)
+    chunks = loader.process_directory()
+    
+    repo_map_gen = RepoMapGenerator()
+    repo_map_string = repo_map_gen.generate_map(chunks)
+    
+    retriever = HybridRetriever()
+    retriever.ingest_chunks(chunks)
+    
+    # --- PHASE 2 ---
+    print("\n[PHASE 2] Initializing SLM Agent (Connecting to local Ollama)...")
+    agent = SLMAgent(repo_map_string=repo_map_string)
+    agent.set_retriever(retriever)
+    
+    try:
+        print("\n--------------------------------------------------")
+        print(f"Question: {args.question}")
+        response = agent.ask(args.question)
+        print(f"Response: {response}")
+        print("--------------------------------------------------")
+    except Exception as e:
+        print(f"\n[!] Failed to connect to local SLM. Please ensure Ollama is running.\nDetails: {e}")
+
+if __name__ == "__main__":
+    main()
+</file>
+
+<file path="README.md">
+# PPP223
+# Python Code Understanding SLM Agent
+
+
+# Team Mobtrap
+
+# Members
+* Nimigean Valentin
+* Balog David
+* Soptelea Sebastian
+* Szarics Iulia
+
+## Overview
+This project focuses on building a Small Language Model (SLM) agent designed for deep Python code understanding. The core objective is to move beyond simple text-matching to create a system that understands the hierarchical nature of Python.
+
+
+---
+
+## Installation
+
+Choose the installation path that matches your use case:
+
+- **Dev/Demo (Runtime Only):**
+  ```bash
+  pip install -r requirements.txt
+  ```
+  *Note: Requires Ollama to be running locally for SLM inference.*
+
+- **Training (GPU Machine Only):**
+  ```bash
+  pip install -r requirements-train.txt
+  ```
+  *Note: Requires NVIDIA GPU with CUDA 12.1+. VRAM: 4-6GB (SFT), 6GB+ (DPO).*
+
+- **Contributing (Development):**
+  ```bash
+  pip install -r requirements-dev.txt
+  ```
+
+---
+
+## Architecture
+### 1. Dataset Selection: The Training Mixture 
+To ensure excellence in code reasoning, the agent utilizes a three-tier data strategy:
+* **High-Signal Code:** Leveraging The Stack v2 (Python Subset) for diverse repository exposure and CodeSearchNet for alignment between logic and natural language.
+* **Logic Benchmarking:** Integrating Human Eval and PyCode Bench during the SFT (Supervised Fine-Tuning) phase for logical consistency .
+* **Synthetic Reasoning:** Generating synthetic Q&A pairs from complex dependency graphs to teach the model how different repository files interact.
+
+### 2. Chunking Strategy: AST-Based Parsing
+We have moved away from character-count chunking in favor of Abstract Syntax Tree (AST) Chunking :
+* **Structural Integrity:** Code is split into logical blocks such as Classes, Methods, and Functions .
+* **Context Preservation:** Every chunk includes decorators, function signatures, and inheritance info to ensure the model maintains the "context" of a code snippet.
+
+### 3. Model & Vector Database Choices
+* **Primary Models:** Qwen2.5-Coder-3B as the primary model, 1.5B as the lightweight fallback
+* **Vector Storage:** Qdrant is selected for its advanced filtering capabilities, allowing for specific metadata queries (e.g., finding methods within a specific class).
+
+### 4. RAG Strategies
+The system experiments with two advanced retrieval methods:
+* **Repo Map Retrieval:** Providing a "bird's eye view" of the entire file structure before fetching specific code.
+* **Hybrid Search:** Combining Vector embeddings for semantic meaning with BM25 keyword search for finding specific variable or function names.
+
+---
+
+## Project Roadmap (Weeks 7-12)
+
+### Phase 1: Sprinting Foundations (Weeks 7-8) 
+* **Week 7:** Implementing the AST parser and metadata attachment.
+* **Week 8:** Finalizing the "Repo Map" and hybrid retrieval logic in Qdrant.
+
+### Phase 2: Fine-Tuning & Logic (Weeks 9-10)
+* **Week 9:** Integrating the SLM and adding tool-calling capabilities (e.g., `grep`) to enable repository exploration.
+* **Week 10:** Performing QLORA fine-tuning on curated Python datasets to improve structured output.
+
+### Phase 3: Alignment & Deployment (Weeks 11-12)
+* **Week 11:** Using DPO (Direct Preference Optimization) to rank 500-1000 outputs, reducing hallucinations.
+* **Week 12:** Applying 4-bit model quantization for local speed and launching the Streamlit-based UI.
+</file>
+
+<file path="requirements.txt">
+qdrant-client[fastembed]>=1.12.0,<2.0.0
+fastembed>=0.6.1,<0.7.0
+pydantic>=2.0.0,<3.0.0
+openai>=1.30.0,<2.0.0
+streamlit>=1.35.0,<2.0.0
+grimp>=3.0,<4.0
+tree-sitter>=0.23.0,<0.24.0
+tree-sitter-python>=0.23.0,<0.24.0
+python-dotenv>=1.0.0
+</file>
+
+<file path="ingest/chunker.py">
+import ast
+from typing import List
+from ingest.metadata import CodeChunk
+
+class ASTChunker:
+    def __init__(self, max_chunk_lines: int = 300):
+        self.max_chunk_lines = max_chunk_lines
+
+    def _check_large_chunk(self, name: str, filepath: str, start: int, end: int):
+        n = end - start + 1
+        if n > self.max_chunk_lines:
+            print(f"[Warning] Large chunk: {name} spans {n} lines in {filepath}")
+
+    def _extract_nested_functions(self, parent_node, parent_qualified_name, filepath, source_code, chunks, depth=0):
+        if depth >= 3:
+            return
+            
+        for node in parent_node.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                chunk_text = ast.get_source_segment(source_code, node)
+                if not chunk_text:
+                    continue
+                
+                self._check_large_chunk(node.name, filepath, node.lineno, node.end_lineno)
+                qualified_name = f"{parent_qualified_name}.{node.name}"
+                
+                decorators = [ast.unparse(d) for d in getattr(node, "decorator_list", [])]
+                signature = ast.unparse(node.args) if hasattr(node, "args") else ""
+                
+                chunks.append(CodeChunk(
+                    filepath=filepath,
+                    chunk_type="function",
+                    name=node.name,
+                    qualified_name=qualified_name,
+                    parent_class=parent_qualified_name.split(".")[-1],
+                    start_line=node.lineno,
+                    end_line=node.end_lineno,
+                    text=chunk_text,
+                    decorators=decorators,
+                    signature=signature
+                ))
+                self._extract_nested_functions(node, qualified_name, filepath, source_code, chunks, depth + 1)
+            elif isinstance(node, ast.ClassDef):
+                chunk_text = ast.get_source_segment(source_code, node)
+                if not chunk_text:
+                    continue
+                
+                self._check_large_chunk(node.name, filepath, node.lineno, node.end_lineno)
+                qualified_name = f"{parent_qualified_name}.{node.name}"
+                
+                decorators = [ast.unparse(d) for d in getattr(node, "decorator_list", [])]
+                bases = [ast.unparse(b) for b in getattr(node, "bases", [])]
+                
+                chunks.append(CodeChunk(
+                    filepath=filepath,
+                    chunk_type="class",
+                    name=node.name,
+                    qualified_name=qualified_name,
+                    parent_class=parent_qualified_name.split(".")[-1],
+                    start_line=node.lineno,
+                    end_line=node.end_lineno,
+                    text=chunk_text,
+                    decorators=decorators,
+                    bases=bases
+                ))
+                self._extract_from_class(node, qualified_name, filepath, source_code, chunks, depth + 1)
+
+    def _extract_from_class(self, class_node, parent_qualified_name, filepath, source_code, chunks, depth=0):
+        if depth >= 3:
+            return
+            
+        for node in class_node.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                chunk_text = ast.get_source_segment(source_code, node)
+                if not chunk_text:
+                    continue
+                
+                self._check_large_chunk(node.name, filepath, node.lineno, node.end_lineno)
+                qualified_name = f"{parent_qualified_name}.{node.name}"
+                
+                decorators = [ast.unparse(d) for d in getattr(node, "decorator_list", [])]
+                signature = ast.unparse(node.args) if hasattr(node, "args") else ""
+                
+                chunks.append(CodeChunk(
+                    filepath=filepath,
+                    chunk_type="method",
+                    name=node.name,
+                    qualified_name=qualified_name,
+                    parent_class=class_node.name,
+                    start_line=node.lineno,
+                    end_line=node.end_lineno,
+                    text=chunk_text,
+                    decorators=decorators,
+                    signature=signature
+                ))
+                # Recurse into method for nested functions
+                self._extract_nested_functions(node, qualified_name, filepath, source_code, chunks, depth + 1)
+            elif isinstance(node, ast.ClassDef):
+                chunk_text = ast.get_source_segment(source_code, node)
+                if not chunk_text:
+                    continue
+                
+                self._check_large_chunk(node.name, filepath, node.lineno, node.end_lineno)
+                qualified_name = f"{parent_qualified_name}.{node.name}"
+                
+                decorators = [ast.unparse(d) for d in getattr(node, "decorator_list", [])]
+                bases = [ast.unparse(b) for b in getattr(node, "bases", [])]
+                
+                chunks.append(CodeChunk(
+                    filepath=filepath,
+                    chunk_type="class",
+                    name=node.name,
+                    qualified_name=qualified_name,
+                    parent_class=class_node.name,
+                    start_line=node.lineno,
+                    end_line=node.end_lineno,
+                    text=chunk_text,
+                    decorators=decorators,
+                    bases=bases
+                ))
+                self._extract_from_class(node, qualified_name, filepath, source_code, chunks, depth + 1)
+
+    def chunk_file(self, filepath: str, source_code: str) -> List[CodeChunk]:
+        """
+        Parses the Python source code into an AST and extracts CodeChunks.
+        """
+        chunks = []
+        try:
+            tree = ast.parse(source_code)
+        except SyntaxError as e:
+            print(f"Syntax error in {filepath}: {e}")
+            raise e # Reraise to let loader handle fallback
+
+        for node in tree.body:
+            # Check for Module level functions
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                chunk_text = ast.get_source_segment(source_code, node)
+                if not chunk_text:
+                    continue
+                    
+                self._check_large_chunk(node.name, filepath, node.lineno, node.end_lineno)
+                
+                decorators = [ast.unparse(d) for d in getattr(node, "decorator_list", [])]
+                signature = ast.unparse(node.args) if hasattr(node, "args") else ""
+                
+                chunks.append(CodeChunk(
+                    filepath=filepath,
+                    chunk_type="function",
+                    name=node.name,
+                    qualified_name=node.name,
+                    parent_class=None,
+                    start_line=node.lineno,
+                    end_line=node.end_lineno,
+                    text=chunk_text,
+                    decorators=decorators,
+                    signature=signature
+                ))
+                # Recurse into nested functions/classes
+                self._extract_nested_functions(node, node.name, filepath, source_code, chunks, depth=1)
+            
+            # Check for Classes
+            elif isinstance(node, ast.ClassDef):
+                chunk_text = ast.get_source_segment(source_code, node)
+                if not chunk_text:
+                    continue
+                    
+                self._check_large_chunk(node.name, filepath, node.lineno, node.end_lineno)
+                
+                decorators = [ast.unparse(d) for d in getattr(node, "decorator_list", [])]
+                bases = [ast.unparse(b) for b in getattr(node, "bases", [])]
+                        
+                chunks.append(CodeChunk(
+                    filepath=filepath,
+                    chunk_type="class",
+                    name=node.name,
+                    qualified_name=node.name,
+                    parent_class=None,
+                    start_line=node.lineno,
+                    end_line=node.end_lineno,
+                    text=chunk_text,
+                    decorators=decorators,
+                    bases=bases
+                ))
+                # Recurse into class body
+                self._extract_from_class(node, node.name, filepath, source_code, chunks, depth=1)
+
+        return chunks
+
+if __name__ == "__main__":
+    source = """
+def top_level_func():
+    def nested_func():
+        pass
+    return True
+
+class OuterClass:
+    class NestedClass:
+        pass
+    
+    def method_one(self):
+        pass
+        
+    def method_two(self):
+        def inner_of_method():
+            pass
+"""
+    chunker = ASTChunker()
+    chunks = chunker.chunk_file("test.py", source)
+    
+    # Expected chunks:
+    # 1. top_level_func
+    # 2. top_level_func.nested_func
+    # 3. OuterClass
+    # 4. OuterClass.NestedClass
+    # 5. OuterClass.method_one
+    # 6. OuterClass.method_two
+    # 7. OuterClass.method_two.inner_of_method
+    
+    chunk_names = {c.qualified_name for c in chunks}
+    print(f"Extracted {len(chunks)} chunks: {chunk_names}")
+    
+    assert "top_level_func" in chunk_names
+    assert "top_level_func.nested_func" in chunk_names
+    assert "OuterClass" in chunk_names
+    assert "OuterClass.NestedClass" in chunk_names
+    assert "OuterClass.method_one" in chunk_names
+    assert "OuterClass.method_two" in chunk_names
+    assert "OuterClass.method_two.inner_of_method" in chunk_names
+    
+    assert len(chunks) == 7
+    print("Chunker OK")
+</file>
+
+<file path="ingest/loader.py">
+import os
+from typing import List
+from ingest.chunker import ASTChunker
+from ingest.metadata import CodeChunk
+
+class Loader:
+    SKIP_DIRS = frozenset({"__pycache__", ".git", ".venv", "venv", "node_modules", "site-packages", "dist-packages", ".eggs", "build", "dist"})
+
+    def __init__(self, root_dir: str):
+        self.root_dir = os.path.abspath(root_dir)
+        self.chunker = ASTChunker()
+
+    def process_directory(self) -> List[CodeChunk]:
+        """
+        Crawls the root directory, reads all .py files, and chunks them.
+        """
+        all_chunks = []
+        files_scanned = 0
+        files_errored = 0
+        
+        for dirpath, _, filenames in os.walk(self.root_dir):
+            # Skip common junk/dependency directories
+            if any(skip in dirpath.split(os.sep) for skip in self.SKIP_DIRS):
+                continue
+                
+            for file in filenames:
+                if file.endswith(".py"):
+                    file_path = os.path.join(dirpath, file)
+                    files_scanned += 1
+                    try:
+                        with open(file_path, "r", encoding="utf-8") as f:
+                            source = f.read()
+                        
+                        relative_path = os.path.relpath(file_path, self.root_dir)
+                        chunks = self.chunker.chunk_file(relative_path, source)
+                        all_chunks.extend(chunks)
+                    except SyntaxError as e:
+                        print(f"SyntaxError in {file_path}, falling back to tree-sitter: {e}")
+                        chunks = self._fallback_tree_sitter_chunk(relative_path, source)
+                        all_chunks.extend(chunks)
+                    except Exception as e:
+                        print(f"Error reading {file_path}: {e}")
+                        files_errored += 1
+        
+        print(f"[Loader] Scanned {files_scanned} .py files -> {len(all_chunks)} chunks extracted ({files_errored} files skipped due to errors)")
+        return all_chunks
+
+    def _fallback_tree_sitter_chunk(self, filepath: str, source: str) -> List[CodeChunk]:
+        chunks = []
+        try:
+            import tree_sitter_python as tspython
+            from tree_sitter import Language, Parser
+            
+            PY_LANGUAGE = Language(tspython.language())
+            parser = Parser()
+            parser.language = PY_LANGUAGE
+            tree = parser.parse(bytes(source, "utf8"))
+            
+            def traverse(node):
+                if node.type in ('function_definition', 'class_definition'):
+                    name_node = next((child for child in node.children if child.type == 'identifier'), None)
+                    name = name_node.text.decode('utf8') if name_node else "unknown"
+                    chunk_type = "function" if node.type == 'function_definition' else "class"
+                    chunks.append(CodeChunk(
+                        filepath=filepath,
+                        chunk_type=chunk_type,
+                        name=name,
+                        start_line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        text=node.text.decode('utf8')
+                    ))
+                for child in node.children:
+                    traverse(child)
+                    
+            traverse(tree.root_node)
+        except Exception as e:
+            print(f"Tree-sitter fallback failed for {filepath}: {e}")
+            
+        return chunks
+</file>
+
+<file path="ingest/metadata.py">
+from pydantic import BaseModel, Field
+from typing import Optional, List
+
+class CodeChunk(BaseModel):
+    filepath: str = Field(description="The path to the file containing this chunk.")
+    chunk_type: str = Field(description="The type of the chunk: 'class', 'function', or 'method'.")
+    name: str = Field(description="The name of the class or function.")
+    qualified_name: Optional[str] = Field(default=None, description="The dotted path of the chunk (e.g. 'Class.method').")
+    parent_class: Optional[str] = Field(default=None, description="The name of the parent class, if this is a method.")
+    start_line: int = Field(description="The starting line number of the chunk (1-indexed).")
+    end_line: int = Field(description="The ending line number of the chunk (1-indexed).")
+    text: str = Field(description="The exact text content of the chunk.")
+    decorators: List[str] = Field(default=[], description="List of decorators applied to this chunk.")
+    signature: str = Field(default="", description="The signature of the function or method.")
+    bases: List[str] = Field(default=[], description="List of base classes for a class chunk.")
+</file>
+
+<file path="rag/retriever.py">
+from qdrant_client import QdrantClient, models
+from typing import List, Dict, Any
+from ingest.metadata import CodeChunk
+
+class HybridRetriever:
+    DENSE_VECTOR_NAME = "fast-bge-small-en-v1.5"
+    SPARSE_VECTOR_NAME = "fast-sparse-bm25"
+
+    def __init__(self):
+        # We use an in-memory database for fast prototyping.
+        # This will automatically utilize fastembed for embeddings.
+        self.client = QdrantClient(":memory:")
+        self.collection_name = "repo_chunks"
+        
+        # Setup the dense embedding model
+        self.client.set_model("BAAI/bge-small-en-v1.5")
+        
+        # Setup the sparse embedding model for BM25 hybrid search
+        try:
+            self.client.set_sparse_model("Qdrant/bm25")
+        except Exception as e:
+            print(f"Warning: Could not load sparse model -> {e}")
+
+    def ingest_chunks(self, chunks: List[CodeChunk]):
+        if not chunks:
+            print("No chunks to ingest.")
+            return
+            
+        documents = [chunk.text for chunk in chunks]
+        metadata = [{"filepath": c.filepath, "type": c.chunk_type, "name": c.name} for c in chunks]
+        ids = list(range(len(chunks)))
+        
+        print(f"Ingesting {len(chunks)} elements into Qdrant vector database...")
+        self.client.add(
+            collection_name=self.collection_name,
+            documents=documents,
+            metadata=metadata,
+            ids=ids
+        )
+        print("Ingestion complete.")
+
+    def search(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        results = self.client.query_points(
+            collection_name=self.collection_name,
+            prefetch=[
+                models.Prefetch(query=query, using=self.SPARSE_VECTOR_NAME, limit=limit),
+                models.Prefetch(query=query, using=self.DENSE_VECTOR_NAME, limit=limit),
+            ],
+            query=models.FusionQuery(fusion=models.Fusion.RRF),
+            limit=limit
+        ).points
+
+        extracted = []
+        for result in results:
+            payload = result.payload or {}
+            doc_text = payload.get("document", "")
+            metadata = {k: v for k, v in payload.items() if k != "document"}
+            extracted.append({"document": doc_text, "metadata": metadata, "score": result.score})
+        return extracted
+
+    @staticmethod
+    def smoke_test():
+        """
+        Validates retriever functionality with dummy data.
+        """
+        retriever = HybridRetriever()
+        
+        # Ingest 3 hardcoded CodeChunk fixtures
+        chunks = [
+            CodeChunk(
+                filepath="src/main.py",
+                chunk_type="function",
+                name="main",
+                start_line=1,
+                end_line=10,
+                text="def main():\n    print('hello world')",
+                signature="def main()"
+            ),
+            CodeChunk(
+                filepath="src/utils.py",
+                chunk_type="function",
+                name="helper",
+                start_line=5,
+                end_line=15,
+                text="def helper(x):\n    return x * 2",
+                signature="def helper(x)"
+            ),
+            CodeChunk(
+                filepath="src/app.py",
+                chunk_type="class",
+                name="App",
+                start_line=1,
+                end_line=50,
+                text="class App:\n    def run(self): pass",
+                signature="class App"
+            )
+        ]
+        
+        retriever.ingest_chunks(chunks)
+        
+        # Perform a search
+        results = retriever.search("hello", limit=2)
+        
+        # Verify results
+        assert len(results) > 0, "Retriever should return at least one result"
+        for res in results:
+            assert "document" in res, "Result missing 'document' key"
+            assert "metadata" in res, "Result missing 'metadata' key"
+            assert "score" in res, "Result missing 'score' key"
+            
+        print("Retriever OK")
+</file>
+
+</files>
