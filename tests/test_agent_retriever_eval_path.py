@@ -283,3 +283,44 @@ query=models.FusionQuery(fusion=models.Fusion.RRF)
     assert "rag/retriever.py" in answer
     assert "FusionQuery" in answer or "RRF" in answer
     assert "model/agent.py" not in answer
+
+
+def test_agent_forces_grep_for_malformed_json_tool_calls():
+    agent = SLMAgent()
+    forced = agent._forced_tool_for_query("How does the agent handle malformed JSON tool calls?")
+    assert forced[0] == "grep_search"
+    assert "_parse_text_tool_call" in forced[1]["pattern"]
+    assert "_repair_common_json" in forced[1]["pattern"]
+    assert forced[1]["directory"] == "model"
+
+
+def test_agent_summarizes_malformed_json_tool_call_result():
+    agent = SLMAgent()
+    tool_result = """
+File: model/agent.py | Line: 58
+Code Snippet:
+def _strip_markdown_json_fence(content: str) -> str:
+    ...
+
+File: model/agent.py | Line: 111
+Code Snippet:
+def _repair_common_json(text: str) -> str:
+    ...
+
+File: model/agent.py | Line: 182
+Code Snippet:
+def _parse_text_tool_call(self, content: str):
+    ...
+"""
+    answer = agent._summarize_forced_tool_result(
+        "How does the agent handle malformed JSON tool calls?",
+        "grep_search",
+        {"pattern": "_parse_text_tool_call|_repair_common_json", "directory": "model"},
+        tool_result,
+    )
+    assert "model/agent.py" in answer
+    assert "_strip_markdown_json_fence" in answer
+    assert "_repair_common_json" in answer
+    assert "_parse_text_tool_call" in answer
+    assert "fake" not in answer.lower()
+    assert "```python" not in answer

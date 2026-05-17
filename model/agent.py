@@ -383,6 +383,26 @@ class SLMAgent:
         if "syntax error" in q or "syntaxerror" in q:
             return ("grep_search", {"pattern": "SyntaxError|_fallback_tree_sitter_chunk", "directory": "ingest"})
             
+        # H. Malformed JSON / text tool-call
+        malformed_keywords = [
+            "malformed json",
+            "json tool call",
+            "json tool calls",
+            "text tool call",
+            "text tool calls",
+            "tool-call json",
+            "tool call json",
+            "raw json",
+        ]
+        if any(kw in q for kw in malformed_keywords):
+            return (
+                "grep_search",
+                {
+                    "pattern": "_parse_text_tool_call|_repair_common_json|_normalize_tool_call_dict|_extract_balanced_json_objects|_strip_markdown_json_fence",
+                    "directory": "model",
+                },
+            )
+            
         return None
 
     def _summarize_forced_tool_result(
@@ -397,6 +417,46 @@ class SLMAgent:
             return f"I could not find repository evidence for that using `{tool_name}` with pattern `{pattern}`."
 
         q = user_prompt.lower()
+
+        # Specific malformed JSON / text tool-call questions
+        malformed_keywords = [
+            "malformed json",
+            "json tool call",
+            "json tool calls",
+            "text tool call",
+            "text tool calls",
+            "tool-call json",
+            "tool call json",
+            "raw json",
+        ]
+        if any(kw in q for kw in malformed_keywords):
+            file_part = ""
+            if "model/agent.py" in tool_result:
+                file_part = " in `model/agent.py`"
+            
+            methods_list = [
+                "_strip_markdown_json_fence",
+                "_extract_balanced_json_objects",
+                "_repair_common_json",
+                "_normalize_tool_call_dict",
+                "_parse_text_tool_call",
+            ]
+            found_methods = [m for m in methods_list if m in tool_result]
+            
+            if found_methods:
+                if len(found_methods) == 1:
+                    methods_str = f"`{found_methods[0]}`"
+                elif len(found_methods) == 2:
+                    methods_str = f"`{found_methods[0]}` and `{found_methods[1]}`"
+                else:
+                    methods_str = ", ".join(f"`{m}`" for m in found_methods[:-1]) + f", and `{found_methods[-1]}`"
+                
+                return (
+                    f"The agent handles malformed or text-form JSON tool calls{file_part}. "
+                    f"The relevant methods are {methods_str}. Together, they strip markdown fences, "
+                    f"extract balanced JSON objects from free text, repair common malformed tool-call JSON, "
+                    f"normalize supported tool-call shapes, and convert them into executable tool calls."
+                )
 
         # Specific syntax error question summary
         if ("syntax error" in q or "syntaxerror" in q) and "SyntaxError" in tool_result and "_fallback_tree_sitter_chunk" in tool_result:
