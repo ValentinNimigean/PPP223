@@ -10,6 +10,8 @@
 * Soptelea Sebastian
 * Szarics Iulia
 
+For setup, demo commands, evaluation, and fine-tuning instructions, see [HOW_TO_USE.md](HOW_TO_USE.md).
+
 ## Overview
 This project focuses on building a Small Language Model (SLM) agent designed for deep Python code understanding. The core objective is to move beyond simple text-matching to create a system that understands the hierarchical nature of Python.
 
