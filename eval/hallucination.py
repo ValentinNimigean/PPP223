@@ -8,13 +8,36 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ingest.metadata import CodeChunk
 
+def _is_code_like_identifier(identifier: str) -> bool:
+    if "_" in identifier:
+        return True
+    if "." in identifier:
+        return True
+    
+    # Check if it has mixed lower/upper case and is not just Titlecase English word
+    has_upper = any(c.isupper() for c in identifier)
+    has_lower = any(c.islower() for c in identifier)
+    if has_upper and has_lower:
+        if not identifier.istitle():
+            return True
+            
+    # Check if all uppercase and length > 2
+    if identifier.isupper() and len(identifier) > 2:
+        return True
+        
+    return False
+
+
 class HallucinationDetector:
     IGNORE = {
         "def", "class", "return", "import", "from", "self", "true",
         "false", "none", "and", "or", "not", "in", "is", "if", "else",
         "for", "while", "with", "as", "try", "except", "pass", "print",
         "str", "int", "float", "list", "dict", "set", "bool", "len",
-        "range", "type"
+        "range", "type",
+        # Common English words/prose to ignore
+        "the", "app", "tests", "repository", "answer", "function", "method",
+        "file", "code", "flow", "chat", "driven", "uses"
     }
 
     def __init__(self, chunks: List[CodeChunk]):
@@ -40,15 +63,18 @@ class HallucinationDetector:
         Scans a response string for Python identifiers and file paths.
         """
         # 1. Extract Python identifiers
-        # r'\b[a-zA-Z_][a-zA-Z0-9_]{2,}\b'
-        identifiers = set(re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]{2,}\b', response))
+        identifiers = set(re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*\b', response))
         
         verified_entities = []
         unverified_entities = []
         
         for ident in identifiers:
             ident_lower = ident.lower()
+            if ident_lower.endswith(".py"):
+                continue
             if ident_lower in self.IGNORE:
+                continue
+            if not _is_code_like_identifier(ident):
                 continue
             
             if ident_lower in self.known_all:

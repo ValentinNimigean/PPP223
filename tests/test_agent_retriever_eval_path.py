@@ -204,3 +204,82 @@ def test_agent_early_answer_streamlit_entrypoint():
     assert "load_backend" in answer
     assert "st.chat_input" in answer
 
+
+def test_agent_honest_mode_disables_early_shortcuts():
+    agent = SLMAgent(
+        repo_map_string="[-] rag/repo_map.py\n  [C] Class: RepoMapGenerator (Lines 5-36)\n    [m] Method: generate_map (Lines 9-36)",
+        enable_deterministic_shortcuts=False,
+        enable_tool_result_templates=False,
+    )
+    answer = agent._try_deterministic_early_answer(
+        "Where is the repository map generated and what method builds it?"
+    )
+    assert answer is not None
+
+    # But ask() should not use this branch when shortcuts are disabled.
+    assert agent.enable_deterministic_shortcuts is False
+    assert agent.enable_tool_result_templates is False
+
+
+def test_agent_rejects_empty_grep_search():
+    agent = SLMAgent()
+    result = agent._execute_tool_by_name("grep_search", {"pattern": "", "directory": ""})
+    assert "pattern is required" in result
+
+
+def test_agent_forces_grep_for_embedding_model():
+    agent = SLMAgent()
+    forced = agent._forced_tool_for_query("What embedding model is used for dense vector search?")
+    assert forced[0] == "grep_search"
+    assert "BAAI" in forced[1]["pattern"]
+
+
+def test_agent_forces_grep_for_fusion_algorithm():
+    agent = SLMAgent()
+    forced = agent._forced_tool_for_query("What fusion algorithm is used to combine dense and sparse search results?")
+    assert forced[0] == "grep_search"
+    assert "FusionQuery" in forced[1]["pattern"]
+
+
+def test_agent_forces_grep_for_skip_dirs():
+    agent = SLMAgent()
+    forced = agent._forced_tool_for_query("What directories does the loader skip when scanning a repo?")
+    assert forced == ("grep_search", {"pattern": "SKIP_DIRS", "directory": "ingest"})
+
+
+def test_agent_summarizes_syntax_error_tool_result():
+    agent = SLMAgent()
+    tool_result = """
+File: ingest/loader.py | Line: 42
+Code Snippet:
+except SyntaxError:
+    chunks.extend(self._fallback_tree_sitter_chunk(filepath, source))
+"""
+    answer = agent._summarize_forced_tool_result(
+        "What happens when a Python file has a syntax error during loading?",
+        "grep_search",
+        {"pattern": "SyntaxError|_fallback_tree_sitter_chunk", "directory": "ingest"},
+        tool_result,
+    )
+    assert "ingest/loader.py" in answer
+    assert "SyntaxError" in answer
+    assert "_fallback_tree_sitter_chunk" in answer
+    assert "LoadError" not in answer
+
+
+def test_agent_summarizes_tool_result_without_inventing_files():
+    agent = SLMAgent()
+    tool_result = '''
+File: rag/retriever.py | Line: 180
+Code Snippet:
+query=models.FusionQuery(fusion=models.Fusion.RRF)
+'''
+    answer = agent._summarize_forced_tool_result(
+        "What fusion algorithm is used to combine dense and sparse search results?",
+        "grep_search",
+        {"pattern": "FusionQuery|RRF|Fusion", "directory": "rag"},
+        tool_result,
+    )
+    assert "rag/retriever.py" in answer
+    assert "FusionQuery" in answer or "RRF" in answer
+    assert "model/agent.py" not in answer

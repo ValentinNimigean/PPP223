@@ -13,6 +13,7 @@ def main():
     parser = argparse.ArgumentParser(description="SLM Agent Demo")
     parser.add_argument("--repo", default=".", help="Path to the Python repo to analyze.")
     parser.add_argument("--question", default="What tool functions are available in the repository? Please grep for def grep_search.", help="Question for the agent.")
+    parser.add_argument("--disable-deterministic-shortcuts", action="store_true", help="Disable deterministic early shortcuts and templates.")
     args = parser.parse_args()
 
     repo_path = os.path.abspath(args.repo)
@@ -33,7 +34,11 @@ def main():
     
     # --- PHASE 2 ---
     print("\n[PHASE 2] Initializing SLM Agent (Connecting to local Ollama)...")
-    agent = SLMAgent(repo_map_string=repo_map_string)
+    agent = SLMAgent(
+        repo_map_string=repo_map_string,
+        enable_deterministic_shortcuts=not args.disable_deterministic_shortcuts,
+        enable_tool_result_templates=not args.disable_deterministic_shortcuts,
+    )
     agent.set_retriever(retriever)
     
     try:

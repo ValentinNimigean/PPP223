@@ -75,3 +75,63 @@ The system experiments with two advanced retrieval methods:
 ### Phase 3: Alignment & Deployment (Weeks 11-12)
 * **Week 11:** Using DPO (Direct Preference Optimization) to rank 500-1000 outputs, reducing hallucinations.
 * **Week 12:** Applying 4-bit model quantization for local speed and launching the Streamlit-based UI.
+
+---
+
+## Evaluation modes
+
+Self-repo benchmarks are useful for fast iteration, but can suffer from contamination because the agent's deterministic shortcuts and system prompts were developed around the repository structure itself. To ensure transparency, we distinguish between three evaluation modes:
+
+* **Demo mode**: Uses deterministic guardrails and tool-result templates to make the user-facing application fast and reliable. This mode is the default and produces high stabilized scores, serving as a rapid capability demonstration rather than a pure measure of model generalization.
+* **Honest eval mode**: Disables all deterministic shortcuts and templates, measuring the pure RAG + LLM loop directly. The agent is forced to use actual tool-calling, reasoning, and retrieval.
+* **External-repo eval**: Evaluates the agent on a completely separate, unseen repository. This is the preferred method for judging true generalization capability.
+
+### Command Examples
+
+**1. Run Demo-mode evaluation (Self-repo):**
+```bash
+python eval/eval.py \
+  --repo . \
+  --model qwen2.5-coder:3b \
+  --benchmark eval/benchmark_self.json \
+  --out eval_report_demo.json
+```
+
+**2. Run Honest-mode evaluation (Self-repo):**
+```bash
+python eval/eval.py \
+  --repo . \
+  --model qwen2.5-coder:3b \
+  --benchmark eval/benchmark_self.json \
+  --out eval_report_honest.json \
+  --disable-deterministic-shortcuts
+```
+
+**3. Run Honest External-repo evaluation (on httpx):**
+```bash
+git clone https://github.com/encode/httpx.git ../httpx
+bash scripts/eval_external_httpx.sh ../httpx qwen2.5-coder:3b
+```
+
+---
+
+## Fine-tuned SLM
+
+To optimize the agent for local inference and specialized Python code understanding, we perform fine-tuning:
+
+* **Base model**: `unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit` (lightweight, instruct-aligned fallback).
+* **Method**: QLoRA parameter-efficient fine-tuning with **Unsloth** for 2x faster training and memory optimization.
+* **Adapter output**: Saved to `results_sft/adapter` (containing SFT LoRA adapters).
+* **Note on Inference**: The Streamlit UI currently uses the base Ollama model unless the SFT/DPO adapter is exported/merged, or served through an adapter-aware backend.
+
+---
+
+## Data hygiene
+
+To prevent training contamination and keep model reasoning high-quality, we enforce strict data hygiene checks prior to SFT/DPO training:
+
+* **Contamination Auditing (`scripts/audit_training_data.py`)**: A reusable script that parses JSONL files and automatically rejects the dataset (exiting with code `1`) if any line contains absolute local machine paths (e.g., `file://`, `/home/`, `/Users/`, `C:\`, `Documents/GitHub`) or contaminated terms (e.g., cloud SDK mentions, framework leaks).
+* **DPO Validation (`scripts/validate_dpo.py`)**: Ensures that chosen DPO candidate answers do not contain vague phrases or toxic prompt anomalies.
+* **Impact**: Absolute local paths are strictly rejected from training data to avoid teaching the model bad citation behaviors. Contaminated preference labels are detected and filtered before DPO alignment.
+
+

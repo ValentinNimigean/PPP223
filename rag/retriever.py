@@ -188,15 +188,12 @@ class HybridRetriever:
 
         # Dense-only fallback through qdrant-client's high-level text query.
         # Keep this conservative because qdrant-client APIs vary by version.
-        try:
-            points = self.client.query(
-                collection_name=self.collection_name,
-                query_text=query,
-                limit=limit,
-            )
-            return [self._format_qdrant_point(point) for point in points]
-        except Exception:
-            raise
+        points = self.client.query(
+            collection_name=self.collection_name,
+            query_text=query,
+            limit=limit,
+        )
+        return [self._format_qdrant_point(point) for point in points]
 
     def _field_boost(self, query_text: str, query_tokens: List[str], meta: Dict[str, Any], doc: str) -> float:
         score = 0.0
@@ -233,28 +230,6 @@ class HybridRetriever:
             if token in signature:
                 score += 3.0
 
-        # Small code-understanding boosts for common benchmark-style questions.
-        # These are not answer hard-coding; they bias toward chunks that contain
-        # the relevant implementation terms.
-        concept_terms = {
-            "hybrid": ["hybridretriever", "fusionquery", "rrf"],
-            "fusion": ["fusionquery", "rrf"],
-            "sparse": ["sparse", "bm25"],
-            "dense": ["bge", "embedding", "dense"],
-            "syntax": ["syntaxerror", "tree_sitter", "fallback"],
-            "skip": ["skip_dirs"],
-            "directories": ["skip_dirs"],
-            "turn": ["max_turns"],
-            "tool": ["grep_search", "semantic_search"],
-            "dependency": ["dependencygraph", "qualified_name", "parent_class"],
-        }
-
-        all_text = " ".join([name, qualified_name, filepath, signature, doc_lower])
-        for token in query_tokens:
-            for related in concept_terms.get(token, []):
-                if related in all_text:
-                    score += 5.0
-
         return score
 
     def _search_local(self, query: str, limit: int) -> List[Dict[str, Any]]:
@@ -267,6 +242,7 @@ class HybridRetriever:
             return []
 
         query_counts = Counter(query_tokens)
+        avg_len = max(sum(sum(c.values()) for c in self._doc_tokens) / max(len(self._doc_tokens), 1), 1.0)
         scored: List[Dict[str, Any]] = []
 
         for idx, (doc, meta, doc_counts) in enumerate(zip(self._documents, self._metadata, self._doc_tokens)):
@@ -274,7 +250,6 @@ class HybridRetriever:
 
             # BM25-ish lexical score without external dependencies.
             doc_len = max(sum(doc_counts.values()), 1)
-            avg_len = max(sum(sum(c.values()) for c in self._doc_tokens) / max(len(self._doc_tokens), 1), 1.0)
             k1 = 1.5
             b = 0.75
 

@@ -22,7 +22,9 @@
       "qdrant_storage",
       "fastembed_cache",
       "scratch",
-      "unsloth_compiled_cache"
+      "unsloth_compiled_cache",
+      "results_sft",
+      "results_dpo"
     ]
   }
 }

@@ -96,6 +96,8 @@ combine_if_exists synthetic_qa_combined.jsonl \
   synthetic_qa_seed.jsonl \
   synthetic_qa_auto.jsonl
 
+python scripts/audit_training_data.py synthetic_qa_combined.jsonl
+
 if [[ "$SKIP_SFT" -eq 0 ]]; then
   echo ""
   echo "========================================"
@@ -185,6 +187,8 @@ if [[ "$SKIP_DPO" -eq 0 ]]; then
     preference_data_failures_base.jsonl \
     preference_data_failures_post.jsonl \
     preference_data_failures_unseen_v2.jsonl
+
+  python scripts/audit_training_data.py preference_data_combined.jsonl
 
   echo ""
   echo "========================================"

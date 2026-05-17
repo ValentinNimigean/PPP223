@@ -16,6 +16,7 @@ def run_cli():
     logging.basicConfig(level=logging.DEBUG, format="%(name)s | %(message)s")
     parser = argparse.ArgumentParser(description="SLM Agent CLI Interface")
     parser.add_argument("--repo", default=".", help="Path to the Python repo to analyze.")
+    parser.add_argument("--disable-deterministic-shortcuts", action="store_true", help="Disable deterministic early shortcuts and templates.")
     args = parser.parse_args()
 
     repo_path = os.path.abspath(args.repo)
@@ -35,7 +36,12 @@ def run_cli():
     retriever.ingest_chunks(chunks)
     
     print("[3/3] Booting Local Agent... (qwen2.5-coder:3b via Ollama)")
-    agent = SLMAgent(repo_map_string=repo_map, hallucination_check=True)
+    agent = SLMAgent(
+        repo_map_string=repo_map,
+        hallucination_check=True,
+        enable_deterministic_shortcuts=not args.disable_deterministic_shortcuts,
+        enable_tool_result_templates=not args.disable_deterministic_shortcuts,
+    )
     agent.set_retriever(retriever)
     agent.set_chunks(chunks)
     

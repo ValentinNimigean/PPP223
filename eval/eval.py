@@ -121,6 +121,7 @@ def main():
     parser.add_argument("--out", default="eval_report.json", help="Output JSON report path")
     parser.add_argument("--verbose", action="store_true", help="Print detailed results")
     parser.add_argument("--benchmark", default=None, help="Path to a JSON benchmark file. Defaults to the built-in self-benchmark.")
+    parser.add_argument("--disable-deterministic-shortcuts", action="store_true", help="Disable deterministic early shortcuts and templates for honest evaluation.")
     args = parser.parse_args()
 
     if args.benchmark:
@@ -156,7 +157,12 @@ def main():
     retriever.ingest_chunks(chunks)
     
     print(f"[3/3] Initializing agent...")
-    agent = SLMAgent(repo_map_string=repo_map, model=args.model)
+    agent = SLMAgent(
+        repo_map_string=repo_map,
+        model=args.model,
+        enable_deterministic_shortcuts=not args.disable_deterministic_shortcuts,
+        enable_tool_result_templates=not args.disable_deterministic_shortcuts,
+    )
     agent.set_retriever(retriever)
     
     results = []
@@ -208,6 +214,8 @@ def main():
         "model": args.model,
         "repo": repo_path,
         "timestamp": datetime.now().isoformat(),
+        "deterministic_shortcuts_enabled": not args.disable_deterministic_shortcuts,
+        "tool_result_templates_enabled": not args.disable_deterministic_shortcuts,
         "overall": {
             "entity_score": total_entity_score / num_q,
             "file_score": total_file_score / num_q,
