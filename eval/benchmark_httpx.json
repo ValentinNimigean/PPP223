@@ -1,0 +1,10 @@
+[
+  {"question": "What class is the main HTTP client in httpx?", "expected_entities": ["Client"], "expected_files": ["httpx/_client.py"]},
+  {"question": "What method sends a GET request synchronously?", "expected_entities": ["get"], "expected_files": ["httpx/_client.py"]},
+  {"question": "Where is the Timeout configuration defined?", "expected_entities": ["Timeout"], "expected_files": ["httpx/_config.py"]},
+  {"question": "What class handles connection pooling?", "expected_entities": ["ConnectionPool", "HTTPConnectionPool"], "expected_files": ["httpx/_transports/default.py"]},
+  {"question": "What exception is raised on a request timeout?", "expected_entities": ["TimeoutException", "ReadTimeout", "ConnectTimeout"], "expected_files": ["httpx/_exceptions.py"]},
+  {"question": "How are authentication credentials attached to a request?", "expected_entities": ["Auth", "BasicAuth", "build_request"], "expected_files": ["httpx/_auth.py"]},
+  {"question": "Where are HTTP status codes checked for raise_for_status?", "expected_entities": ["raise_for_status", "HTTPStatusError"], "expected_files": ["httpx/_models.py"]},
+  {"question": "What base class does AsyncClient extend?", "expected_entities": ["AsyncClient", "BaseClient"], "expected_files": ["httpx/_client.py"]}
+]

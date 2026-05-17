@@ -25,6 +25,8 @@ def get_cli_args():
     parser.add_argument("--judge", default="gpt-4o", help="Judge model")
     parser.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI-compatible base URL")
     parser.add_argument("--limit", type=int, help="Max rows to process")
+    parser.add_argument("--student-url", default=None, help="Base URL of a local SFT model (e.g. http://localhost:11434/v1). If set, one candidate is drawn from this model instead of the teacher.")
+    parser.add_argument("--student-model", default="qwen2.5-coder:3b", help="Model name to use at --student-url")
     return parser.parse_args()
 
 def load_existing_prompts(output_path: str) -> set:
@@ -50,6 +52,12 @@ def main():
         
     client = OpenAI(api_key=api_key, base_url=args.base_url)
     
+    student_client = None
+    if args.student_url:
+        from openai import OpenAI as _OpenAI
+        student_client = _OpenAI(base_url=args.student_url, api_key="ollama-local")
+        print(f"Student client initialized at {args.student_url} using model {args.student_model}")
+        
     seen_prompts = load_existing_prompts(args.output)
     
     written_count = 0
@@ -84,14 +92,21 @@ def main():
             except json.JSONDecodeError:
                 continue
                 
-            # Extract user question
+            # Extract full context from the training row
             messages = row.get("messages", [])
             user_question = ""
+            system_content = "You are a Python code understanding assistant. Always cite the file path and line numbers when referring to code."
+
             for msg in messages:
-                if msg.get("role") == "user":
+                if msg.get("role") == "system" and not system_content.startswith("You are a Python Expert"):
+                    # Prefer the row's own system prompt, but skip the tool-use one with <REPO_MAP>
+                    # since that placeholder won't be filled here
+                    raw = msg.get("content", "")
+                    if "<REPO_MAP>" not in raw:
+                        system_content = raw
+                if msg.get("role") == "user" and not user_question:
                     user_question = msg.get("content", "")
-                    break
-            
+
             if not user_question:
                 continue
                 
@@ -99,23 +114,40 @@ def main():
                 skipped_count += 1
                 continue
             
-            # Generate 3 candidates
+            # Candidate strategy:
+            # - candidate 0: teacher at low temp (gold standard)
+            # - candidate 1: teacher at high temp (diverse but still strong)
+            # - candidate 2: student model if available, else teacher at high temp
+            # This gives the judge a real signal: teacher vs student failure modes.
+            candidate_configs = [
+                {"client": client, "model": args.model, "temperature": 0.1},
+                {"client": client, "model": args.model, "temperature": 0.9},
+                {
+                    "client": student_client if student_client is not None else client,
+                    "model": args.student_model if student_client is not None else args.model,
+                    "temperature": 0.7
+                },
+            ]
+
             candidates = []
-            temperatures = [0.9, 0.9, 0.1]
-            
             gen_failed = False
-            for temp in temperatures:
+            for cfg in candidate_configs:
                 try:
-                    response = client.chat.completions.create(
-                        model=args.model,
-                        messages=[{"role": "user", "content": user_question}],
-                        temperature=temp
+                    response = cfg["client"].chat.completions.create(
+                        model=cfg["model"],
+                        messages=[
+                            {"role": "system", "content": system_content},
+                            {"role": "user", "content": user_question},
+                        ],
+                        temperature=cfg["temperature"],
+                        timeout=30,  # student may be slow
                     )
                     candidates.append(response.choices[0].message.content)
-                    total_prompt_tokens += response.usage.prompt_tokens
-                    total_completion_tokens += response.usage.completion_tokens
+                    if cfg["client"] is not student_client:
+                        total_prompt_tokens += response.usage.prompt_tokens
+                        total_completion_tokens += response.usage.completion_tokens
                 except Exception as e:
-                    print(f"Warning: Teacher generation failed: {e}")
+                    print(f"Warning: Candidate generation failed: {e}")
                     gen_failed = True
                     break
             
@@ -124,9 +156,13 @@ def main():
                 continue
                 
             # Call Judge
-            judge_user_content = f"Question: {user_question}\n\n"
+            judge_user_content = (
+                f"Context: {system_content}\n\n"
+                f"Question: {user_question}\n\n"
+            )
             for i, cand in enumerate(candidates):
-                judge_user_content += f"[{i}]: {cand}\n\n"
+                label = ["Teacher (precise)", "Teacher (diverse)", "Student model" if student_client else "Teacher (diverse 2)"][i]
+                judge_user_content += f"[{i}] ({label}): {cand}\n\n"
             
             try:
                 judge_response = client.chat.completions.create(
@@ -157,7 +193,14 @@ def main():
                 output_row = {
                     "prompt": user_question,
                     "chosen": candidates[best_idx],
-                    "rejected": candidates[worst_idx]
+                    "rejected": candidates[worst_idx],
+                    "meta": {
+                        "best_idx": best_idx,
+                        "worst_idx": worst_idx,
+                        "reasoning": judge_data.get("reasoning", ""),
+                        "student_was_candidate_2": student_client is not None,
+                        "rejected_was_student": worst_idx == 2 and student_client is not None,
+                    }
                 }
                 f_out.write(json.dumps(output_row) + "\n")
                 f_out.flush()

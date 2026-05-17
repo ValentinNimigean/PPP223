@@ -4,7 +4,22 @@ from ingest.chunker import ASTChunker
 from ingest.metadata import CodeChunk
 
 class Loader:
-    SKIP_DIRS = frozenset({"__pycache__", ".git", ".venv", "venv", "node_modules", "site-packages", "dist-packages", ".eggs", "build", "dist"})
+    SKIP_DIRS = frozenset({
+        "__pycache__",
+        ".git",
+        ".venv",
+        "venv",
+        "node_modules",
+        "site-packages",
+        "dist-packages",
+        "unsloth_compiled_cache",
+        "qdrant_storage",
+        "fastembed_cache",
+        "scratch",
+        ".eggs",
+        "build",
+        "dist"
+    })
 
     def __init__(self, root_dir: str):
         self.root_dir = os.path.abspath(root_dir)
@@ -18,8 +33,11 @@ class Loader:
         files_scanned = 0
         files_errored = 0
         
-        for dirpath, _, filenames in os.walk(self.root_dir):
-            # Skip common junk/dependency directories
+        for dirpath, dirnames, filenames in os.walk(self.root_dir):
+            # Modify dirnames in-place to optimize traversal and avoid visiting skipped directories
+            dirnames[:] = [d for d in dirnames if d not in self.SKIP_DIRS]
+
+            # Skip common junk/dependency directories just in case
             if any(skip in dirpath.split(os.sep) for skip in self.SKIP_DIRS):
                 continue
                 

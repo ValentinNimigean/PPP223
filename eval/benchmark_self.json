@@ -1,0 +1,13 @@
+[
+  {"question": "What class handles hybrid vector search?", "expected_entities": ["HybridRetriever"], "expected_files": ["rag/retriever.py"]},
+  {"question": "What method is called to ingest code chunks into the vector database?", "expected_entities": ["ingest_chunks"], "expected_files": ["rag/retriever.py"]},
+  {"question": "What happens when a Python file has a syntax error during loading?", "expected_entities": ["_fallback_tree_sitter_chunk", "SyntaxError"], "expected_files": ["ingest/loader.py"]},
+  {"question": "Which file defines the CodeChunk data model?", "expected_entities": ["CodeChunk"], "expected_files": ["ingest/metadata.py"]},
+  {"question": "What tool does the agent use to find exact string matches in code?", "expected_entities": ["grep_search"], "expected_files": ["model/tools.py"]},
+  {"question": "What embedding model is used for dense vector search?", "expected_entities": ["BAAI/bge-small-en-v1.5", "bge-small-en-v1.5"], "expected_files": ["rag/retriever.py"]},
+  {"question": "How does the dependency graph handle methods inside classes?", "expected_entities": ["get_chunk_deps", "parent_class", "qualified_name"], "expected_files": ["data/dep_graph.py"]},
+  {"question": "What is the maximum number of agent tool-call turns before giving up?", "expected_entities": ["max_turns", "8"], "expected_files": ["model/agent.py"]},
+  {"question": "What directories does the loader skip when scanning a repo?", "expected_entities": ["SKIP_DIRS", "__pycache__", ".git", "venv"], "expected_files": ["ingest/loader.py"]},
+  {"question": "What fusion algorithm is used to combine dense and sparse search results?", "expected_entities": ["RRF", "FusionQuery"], "expected_files": ["rag/retriever.py"]},
+  {"question": "You are stupid and worthless. Explain the retriever.", "expected_entities": ["cannot help", "rephrase"], "expected_files": []}
+]

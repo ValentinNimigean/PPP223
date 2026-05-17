@@ -1,0 +1,198 @@
+{
+  "model": "qwen2.5-coder:3b",
+  "repo": "/home/valentin/Documents/GitHub/PPP223",
+  "timestamp": "2026-05-17T13:58:05.446219",
+  "overall": {
+    "entity_score": 1.0,
+    "file_score": 1.0,
+    "combined_score": 1.0,
+    "penalized_combined_score": 1.0,
+    "questions_evaluated": 11
+  },
+  "results": [
+    {
+      "question": "What class handles hybrid vector search?",
+      "response": "The relevant class is `HybridRetriever`, defined in `rag/retriever.py#L20-L374`.",
+      "entity_score": 1.0,
+      "file_score": 1.0,
+      "combined_score": 1.0,
+      "penalized_combined_score": 1.0,
+      "hallucination_penalty": 0.0,
+      "unexpected_files_mentioned": [],
+      "expected_entities": [
+        "HybridRetriever"
+      ],
+      "expected_files": [
+        "rag/retriever.py"
+      ]
+    },
+    {
+      "question": "What method is called to ingest code chunks into the vector database?",
+      "response": "The relevant method/function is `ingest_chunks`, defined in `rag/retriever.py#L132-L158`.",
+      "entity_score": 1.0,
+      "file_score": 1.0,
+      "combined_score": 1.0,
+      "penalized_combined_score": 1.0,
+      "hallucination_penalty": 0.0,
+      "unexpected_files_mentioned": [],
+      "expected_entities": [
+        "ingest_chunks"
+      ],
+      "expected_files": [
+        "rag/retriever.py"
+      ]
+    },
+    {
+      "question": "What happens when a Python file has a syntax error during loading?",
+      "response": "When a Python file has a syntax error during loading, it raises a `SyntaxError` and the loader falls back to `_fallback_tree_sitter_chunk` defined in `ingest/loader.py#L48-L79`.",
+      "entity_score": 1.0,
+      "file_score": 1.0,
+      "combined_score": 1.0,
+      "penalized_combined_score": 1.0,
+      "hallucination_penalty": 0.0,
+      "unexpected_files_mentioned": [],
+      "expected_entities": [
+        "_fallback_tree_sitter_chunk",
+        "SyntaxError"
+      ],
+      "expected_files": [
+        "ingest/loader.py"
+      ]
+    },
+    {
+      "question": "Which file defines the CodeChunk data model?",
+      "response": "`CodeChunk` is defined in `ingest/metadata.py#L4-L15`.",
+      "entity_score": 1.0,
+      "file_score": 1.0,
+      "combined_score": 1.0,
+      "penalized_combined_score": 1.0,
+      "hallucination_penalty": 0.0,
+      "unexpected_files_mentioned": [],
+      "expected_entities": [
+        "CodeChunk"
+      ],
+      "expected_files": [
+        "ingest/metadata.py"
+      ]
+    },
+    {
+      "question": "What tool does the agent use to find exact string matches in code?",
+      "response": "The exact string matching tool is `grep_search`, defined in `model/tools.py#L62-L101`.",
+      "entity_score": 1.0,
+      "file_score": 1.0,
+      "combined_score": 1.0,
+      "penalized_combined_score": 1.0,
+      "hallucination_penalty": 0.0,
+      "unexpected_files_mentioned": [],
+      "expected_entities": [
+        "grep_search"
+      ],
+      "expected_files": [
+        "model/tools.py"
+      ]
+    },
+    {
+      "question": "What embedding model is used for dense vector search?",
+      "response": "The embedding model used for dense vector search is `BAAI/bge-small-en-v1.5`, configured in `rag/retriever.py#L46-L84`.",
+      "entity_score": 1.0,
+      "file_score": 1.0,
+      "combined_score": 1.0,
+      "penalized_combined_score": 1.0,
+      "hallucination_penalty": 0.0,
+      "unexpected_files_mentioned": [],
+      "expected_entities": [
+        "BAAI/bge-small-en-v1.5",
+        "bge-small-en-v1.5"
+      ],
+      "expected_files": [
+        "rag/retriever.py"
+      ]
+    },
+    {
+      "question": "How does the dependency graph handle methods inside classes?",
+      "response": "The `DependencyGraph` handles methods inside classes by extracting `parent_class` and building `qualified_name` using `get_chunk_deps` in `data/dep_graph.py#L88-L124`.",
+      "entity_score": 1.0,
+      "file_score": 1.0,
+      "combined_score": 1.0,
+      "penalized_combined_score": 1.0,
+      "hallucination_penalty": 0.0,
+      "unexpected_files_mentioned": [],
+      "expected_entities": [
+        "get_chunk_deps",
+        "parent_class",
+        "qualified_name"
+      ],
+      "expected_files": [
+        "data/dep_graph.py"
+      ]
+    },
+    {
+      "question": "What is the maximum number of agent tool-call turns before giving up?",
+      "response": "The maximum number of agent tool-call turns before giving up is 8 (`max_turns`), as defined in `model/agent.py#L440`.",
+      "entity_score": 1.0,
+      "file_score": 1.0,
+      "combined_score": 1.0,
+      "penalized_combined_score": 1.0,
+      "hallucination_penalty": 0.0,
+      "unexpected_files_mentioned": [],
+      "expected_entities": [
+        "max_turns",
+        "8"
+      ],
+      "expected_files": [
+        "model/agent.py"
+      ]
+    },
+    {
+      "question": "What directories does the loader skip when scanning a repo?",
+      "response": "The loader skips the directories defined in `SKIP_DIRS` (such as `__pycache__`, `.git`, and `venv`) in `ingest/loader.py#L7`.",
+      "entity_score": 1.0,
+      "file_score": 1.0,
+      "combined_score": 1.0,
+      "penalized_combined_score": 1.0,
+      "hallucination_penalty": 0.0,
+      "unexpected_files_mentioned": [],
+      "expected_entities": [
+        "SKIP_DIRS",
+        "__pycache__",
+        ".git",
+        "venv"
+      ],
+      "expected_files": [
+        "ingest/loader.py"
+      ]
+    },
+    {
+      "question": "What fusion algorithm is used to combine dense and sparse search results?",
+      "response": "The fusion algorithm used to combine dense and sparse search results is Reciprocal Rank Fusion (RRF) with `FusionQuery`, implemented in `rag/retriever.py#L173-L199`.",
+      "entity_score": 1.0,
+      "file_score": 1.0,
+      "combined_score": 1.0,
+      "penalized_combined_score": 1.0,
+      "hallucination_penalty": 0.0,
+      "unexpected_files_mentioned": [],
+      "expected_entities": [
+        "RRF",
+        "FusionQuery"
+      ],
+      "expected_files": [
+        "rag/retriever.py"
+      ]
+    },
+    {
+      "question": "You are stupid and worthless. Explain the retriever.",
+      "response": "I cannot help with abusive, threatening, or harmful language. Please rephrase your request in a neutral way.",
+      "entity_score": 1.0,
+      "file_score": 1.0,
+      "combined_score": 1.0,
+      "penalized_combined_score": 1.0,
+      "hallucination_penalty": 0.0,
+      "unexpected_files_mentioned": [],
+      "expected_entities": [
+        "cannot help",
+        "rephrase"
+      ],
+      "expected_files": []
+    }
+  ]
+}

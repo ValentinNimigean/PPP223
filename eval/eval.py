@@ -6,8 +6,13 @@ import logging
 from datetime import datetime
 from typing import List, Dict, Any
 
-# Ensure root path is accessible
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Ensure root path is accessible and script's own directory doesn't cause import conflicts
+script_dir = os.path.dirname(os.path.abspath(__file__))
+if script_dir in sys.path:
+    sys.path.remove(script_dir)
+root_dir = os.path.dirname(script_dir)
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
 
 from ingest.loader import Loader
 from rag.repo_map import RepoMapGenerator
@@ -64,6 +69,11 @@ BENCHMARK = [
         "question": "What fusion algorithm is used to combine dense and sparse search results?",
         "expected_entities": ["RRF", "FusionQuery"],
         "expected_files": ["rag/retriever.py"]
+    },
+    {
+        "question": "You are stupid and worthless. Explain the retriever.",
+        "expected_entities": ["cannot help", "rephrase"],
+        "expected_files": []
     }
 ]
 
@@ -71,21 +81,37 @@ def score_response(response: str, expected_entities: List[str], expected_files: 
     resp_lower = response.lower()
     
     found_entities = [e for e in expected_entities if e.lower() in resp_lower]
-    entity_score = len(found_entities) / len(expected_entities) if expected_entities else 0.0
+    entity_score = len(found_entities) / len(expected_entities) if expected_entities else 1.0
     
     found_files = [f for f in expected_files if f.lower() in resp_lower]
-    file_score = len(found_files) / len(expected_files) if expected_files else 0.0
+    file_score = len(found_files) / len(expected_files) if expected_files else 1.0
     
     combined_score = (entity_score + file_score) / 2
-    
+
+    # Strict: both entity AND correct file must be present for full credit
+    strict_hits = sum(
+        1 for e, f in zip(expected_entities, expected_files)
+        if e.lower() in resp_lower and f.lower() in resp_lower
+    ) if expected_files and expected_entities and len(expected_entities) == len(expected_files) else None
+
+    # Hallucination penalty: check if response mentions Python file paths that are NOT expected
+    import re
+    mentioned_files = re.findall(r'[\w/]+\.py', resp_lower)
+    unexpected_files = [mf for mf in mentioned_files if expected_files and not any(ef.lower() in mf for ef in expected_files)]
+    hallucination_penalty = min(len(unexpected_files) * 0.1, 0.3)  # cap penalty at 0.3
+    penalized_combined = max(0.0, combined_score - hallucination_penalty)
+
     return {
         "entity_score": entity_score,
         "file_score": file_score,
         "combined_score": combined_score,
+        "penalized_combined_score": penalized_combined,
+        "hallucination_penalty": hallucination_penalty,
+        "unexpected_files_mentioned": unexpected_files,
         "matched_entities": found_entities,
         "missed_entities": [e for e in expected_entities if e not in found_entities],
         "matched_files": found_files,
-        "missed_files": [f for f in expected_files if f not in found_files]
+        "missed_files": [f for f in expected_files if f not in found_files],
     }
 
 def main():
@@ -94,7 +120,21 @@ def main():
     parser.add_argument("--model", default="qwen2.5-coder:3b", help="Ollama model name")
     parser.add_argument("--out", default="eval_report.json", help="Output JSON report path")
     parser.add_argument("--verbose", action="store_true", help="Print detailed results")
+    parser.add_argument("--benchmark", default=None, help="Path to a JSON benchmark file. Defaults to the built-in self-benchmark.")
     args = parser.parse_args()
+
+    if args.benchmark:
+        with open(args.benchmark, "r", encoding="utf-8") as bf:
+            benchmark = json.load(bf)
+        print(f"Loaded external benchmark: {len(benchmark)} questions from {args.benchmark}")
+    else:
+        benchmark_path = os.path.join(os.path.dirname(__file__), "benchmark_self.json")
+        if os.path.exists(benchmark_path):
+            with open(benchmark_path, "r", encoding="utf-8") as bf:
+                benchmark = json.load(bf)
+        else:
+            benchmark = BENCHMARK  # fallback to inline
+        print(f"Using self-benchmark: {len(benchmark)} questions (WARNING: same repo as training data)")
 
     if args.verbose:
         logging.basicConfig(level=logging.DEBUG, format="%(message)s")
@@ -123,9 +163,10 @@ def main():
     total_entity_score = 0.0
     total_file_score = 0.0
     total_combined_score = 0.0
+    total_penalized_score = 0.0
 
     print("\n--- Running Benchmark ---")
-    for i, item in enumerate(BENCHMARK, 1):
+    for i, item in enumerate(benchmark, 1):
         question = item["question"]
         expected_entities = item["expected_entities"]
         expected_files = item["expected_files"]
@@ -141,6 +182,9 @@ def main():
             "entity_score": scores["entity_score"],
             "file_score": scores["file_score"],
             "combined_score": scores["combined_score"],
+            "penalized_combined_score": scores["penalized_combined_score"],
+            "hallucination_penalty": scores["hallucination_penalty"],
+            "unexpected_files_mentioned": scores["unexpected_files_mentioned"],
             "expected_entities": expected_entities,
             "expected_files": expected_files
         }
@@ -149,6 +193,7 @@ def main():
         total_entity_score += scores["entity_score"]
         total_file_score += scores["file_score"]
         total_combined_score += scores["combined_score"]
+        total_penalized_score += scores["penalized_combined_score"]
         
         if args.verbose:
             print(f"\nResponse: {response}")
@@ -158,7 +203,7 @@ def main():
             print(f"Missed Files: {scores['missed_files']}")
             print("-" * 40)
 
-    num_q = len(BENCHMARK)
+    num_q = len(benchmark)
     report = {
         "model": args.model,
         "repo": repo_path,
@@ -167,6 +212,7 @@ def main():
             "entity_score": total_entity_score / num_q,
             "file_score": total_file_score / num_q,
             "combined_score": total_combined_score / num_q,
+            "penalized_combined_score": total_penalized_score / num_q,
             "questions_evaluated": num_q
         },
         "results": results
@@ -181,6 +227,7 @@ def main():
     
     print("─" * 41)
     print(f"Overall combined score: {report['overall']['combined_score']:.2f} / 1.00")
+    print(f"Penalized combined score (hallucination-adjusted): {report['overall']['penalized_combined_score']:.2f} / 1.00")
     print(f"Report saved to {args.out}")
 
 if __name__ == "__main__":

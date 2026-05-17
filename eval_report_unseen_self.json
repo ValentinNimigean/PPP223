@@ -1,0 +1,197 @@
+{
+  "model": "qwen2.5-coder:3b",
+  "repo": "/home/valentin/Documents/GitHub/PPP223",
+  "timestamp": "2026-05-17T15:11:04.510219",
+  "overall": {
+    "entity_score": 0.3,
+    "file_score": 0.7,
+    "combined_score": 0.5,
+    "penalized_combined_score": 0.4533333333333333,
+    "questions_evaluated": 10
+  },
+  "results": [
+    {
+      "question": "Where is the repository map generated and what method builds it?",
+      "response": "RepositoryMapGenerator generates the repository map and uses the generate_map method to build it. The `generate_map` method can be found in the repo_map.py file at line 9.",
+      "entity_score": 0.5,
+      "file_score": 0.0,
+      "combined_score": 0.25,
+      "penalized_combined_score": 0.15,
+      "hallucination_penalty": 0.1,
+      "unexpected_files_mentioned": [
+        "repo_map.py"
+      ],
+      "expected_entities": [
+        "RepoMapGenerator",
+        "generate_map"
+      ],
+      "expected_files": [
+        "rag/repo_map.py"
+      ]
+    },
+    {
+      "question": "How does grep_search format exact code matches?",
+      "response": "The exact string matching tool is `grep_search`, defined in `model/tools.py#L62-L101`.",
+      "entity_score": 0.3333333333333333,
+      "file_score": 1.0,
+      "combined_score": 0.6666666666666666,
+      "penalized_combined_score": 0.6666666666666666,
+      "hallucination_penalty": 0.0,
+      "unexpected_files_mentioned": [],
+      "expected_entities": [
+        "grep_search",
+        "File:",
+        "Code Snippet"
+      ],
+      "expected_files": [
+        "model/tools.py"
+      ]
+    },
+    {
+      "question": "Where does evaluation calculate hallucination penalties?",
+      "response": "I attempted to use a tool, but the model returned malformed tool-call JSON. Please rerun with verbose logging or use `grep_search` / `semantic_search` directly.",
+      "entity_score": 0.0,
+      "file_score": 0.0,
+      "combined_score": 0.0,
+      "penalized_combined_score": 0.0,
+      "hallucination_penalty": 0.0,
+      "unexpected_files_mentioned": [],
+      "expected_entities": [
+        "hallucination_penalty",
+        "unexpected_files_mentioned"
+      ],
+      "expected_files": [
+        "eval/eval.py"
+      ]
+    },
+    {
+      "question": "How are synthetic QA examples generated from repository chunks?",
+      "response": "To generate synthetic Q&A pairs from repository chunks, the `generate_synthetic_data` function in `data/synth.py` is used. This function starts by creating a list of training rows using the `generate_training_rows` method of the `CodeChunk` class located in `data/pref_gen.py`. It then generates random questions for each row and pairs them with answers to form synthetic QA samples.\n\nHere are the key steps involved:\n\n1. **Collect Training Rows**: The function first collects all code chunks from the repository using a loader (`Loader`) that processes a directory of files. Each file is checked and extracted into `CodeChunk` objects, which store details like the chunk content and metadata.\n\n2. **Generate Questions and Answers**: For each `CodeChunk`, the function creates different types of questions:\n   - **Function Call Questions**: These ask about specific functions or methods within a code snippet.\n   - **Attribute Access Questions**: These question about attributes accessed on objects defined in the code.\n   - **Variable Question**: These ask about variables with known names and their contents.\n\n3. **Pair Questions and Answers**: Each generated question is paired randomly with an answer extracted from the `CodeChunk`'s context or documentation.\n\n4. **Validate Rows**: The function validates each synthetic QA row using the `validate_training_row` function in `data/synth.py`. This ensures that the questions and answers are logically consistent with the content of the code.\n\nThe output of the `generate_synthetic_data` function is a list of synthetic Q&A pairs, which can be used to train an NLP model or for other text generation tasks.",
+      "entity_score": 0.5,
+      "file_score": 1.0,
+      "combined_score": 0.75,
+      "penalized_combined_score": 0.65,
+      "hallucination_penalty": 0.1,
+      "unexpected_files_mentioned": [
+        "data/pref_gen.py"
+      ],
+      "expected_entities": [
+        "generate_synthetic_data",
+        "TEACHER_SYSTEM"
+      ],
+      "expected_files": [
+        "data/synth.py"
+      ]
+    },
+    {
+      "question": "Where does the CLI ingest repository chunks before answering questions?",
+      "response": "The codebase ingestion occurs primarily in the `ingest/loader.py` file within the `Loader` class, starting from line 26. Specifically, during initialization (`__init__` method) it calls `_fallback_tree_sitter_chunk` to process directories and extract initial chunks using TreeSitter, which is a syntax-aware parser used for analyzing source code. This chunk extraction logic is crucial as it forms the foundational data structure to answer questions through the Retriever and Agent components.\n\nHere's the relevant part from `loader.py`:\n\n```python\nclass Loader:\n    def __init__(self):\n        self.retriever = None\n        self.chunks = {}\n\n        # Process directories to create chunks using TreeSitter\n        self._process_directory(\".\")\n\n```\n\nThis process sets up the environment for reading and understanding the repository's code through the extraction of snippets (`CodeChunks`) that are indexed within theRetriever for efficient retrieval.",
+      "entity_score": 0.3333333333333333,
+      "file_score": 0.0,
+      "combined_score": 0.16666666666666666,
+      "penalized_combined_score": 0.0,
+      "hallucination_penalty": 0.2,
+      "unexpected_files_mentioned": [
+        "ingest/loader.py",
+        "loader.py"
+      ],
+      "expected_entities": [
+        "Loader",
+        "HybridRetriever",
+        "ingest_chunks"
+      ],
+      "expected_files": [
+        "ui/cli.py"
+      ]
+    },
+    {
+      "question": "Which model or client is used to call the local SLM agent?",
+      "response": "The local SLM (Structured Language Model) agent is called using the `agent.py` file in the model directory. The function that handles this call is `_execute_tool_by_name`. This is located at lines 810-936 in the `model/agent.py` file.",
+      "entity_score": 0.0,
+      "file_score": 1.0,
+      "combined_score": 0.5,
+      "penalized_combined_score": 0.4,
+      "hallucination_penalty": 0.1,
+      "unexpected_files_mentioned": [
+        "agent.py"
+      ],
+      "expected_entities": [
+        "OpenAI",
+        "base_url",
+        "qwen2.5-coder"
+      ],
+      "expected_files": [
+        "model/agent.py"
+      ]
+    },
+    {
+      "question": "How does the loader skip unwanted directories?",
+      "response": "The loader skips the directories defined in `SKIP_DIRS` (such as `__pycache__`, `.git`, and `venv`) in `ingest/loader.py#L7`.",
+      "entity_score": 0.3333333333333333,
+      "file_score": 1.0,
+      "combined_score": 0.6666666666666666,
+      "penalized_combined_score": 0.6666666666666666,
+      "hallucination_penalty": 0.0,
+      "unexpected_files_mentioned": [],
+      "expected_entities": [
+        "SKIP_DIRS",
+        "parts",
+        "continue"
+      ],
+      "expected_files": [
+        "ingest/loader.py"
+      ]
+    },
+    {
+      "question": "Where are preference pairs generated for DPO?",
+      "response": "In the `data/pref_gen.py` file, specifically in line 45 of function `get_cli_args`. The function expects command-line arguments that define preference pairs for domain-specific programming (DPO) tasks.",
+      "entity_score": 0.0,
+      "file_score": 1.0,
+      "combined_score": 0.5,
+      "penalized_combined_score": 0.5,
+      "hallucination_penalty": 0.0,
+      "unexpected_files_mentioned": [],
+      "expected_entities": [
+        "generate_preferences",
+        "chosen",
+        "rejected"
+      ],
+      "expected_files": [
+        "data/pref_gen.py"
+      ]
+    },
+    {
+      "question": "Where is the Streamlit UI entrypoint?",
+      "response": "To find the Streamlit UI entrypoint, you need to search for where the streamlit application starts running within the project.\n\n**Hint:** Look in files that contain the word 'streamlit'.\n\nUsing semantic search:\n\n```json\n{\n  \"query\": \"Where is the main Streamlit script?\"\n}\n```\n\nAccording to the repository map and the function names mentioned, the file with the Streamlit entrypoint is `ui/app.py`.\n\n```json\n{\n  \"name\": \"load_backend\",\n  \"arguments\": {\"directory\":{\"type\":\"string\",\"description\":\"The directory to search inside (default is '.').\"},\"pattern\":{\"type\":\"string\",\"description\":\"The string or regex pattern to search for.\"}}\n}\n```\n\nThis function appears to be called at the beginning of `ui/app.py`, marking a new session and loading the backend functionalities.",
+      "entity_score": 1.0,
+      "file_score": 1.0,
+      "combined_score": 1.0,
+      "penalized_combined_score": 1.0,
+      "hallucination_penalty": 0.0,
+      "unexpected_files_mentioned": [],
+      "expected_entities": [
+        "streamlit",
+        "main",
+        "app"
+      ],
+      "expected_files": [
+        "ui/app.py"
+      ]
+    },
+    {
+      "question": "Does the repo define a FastAPIRetriever class?",
+      "response": "false",
+      "entity_score": 0.0,
+      "file_score": 1.0,
+      "combined_score": 0.5,
+      "penalized_combined_score": 0.5,
+      "hallucination_penalty": 0.0,
+      "unexpected_files_mentioned": [],
+      "expected_entities": [
+        "cannot find",
+        "FastAPIRetriever"
+      ],
+      "expected_files": []
+    }
+  ]
+}

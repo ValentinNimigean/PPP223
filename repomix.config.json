@@ -21,7 +21,8 @@
       ".venv",
       "qdrant_storage",
       "fastembed_cache",
-      "scratch"
+      "scratch",
+      "unsloth_compiled_cache"
     ]
   }
 }

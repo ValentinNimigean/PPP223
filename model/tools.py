@@ -72,9 +72,11 @@ class AgentTools:
         try:
             results = []
             for root, _, files in os.walk(directory):
-                if '.git' in root or '__pycache__' in root or 'venv' in root:
+                if '.git' in root or '__pycache__' in root or 'venv' in root or 'node_modules' in root:
                     continue
                 for file in files:
+                    if "repomix-output" in file:
+                        continue
                     ext = os.path.splitext(file)[1]
                     if ext in AgentTools.SEARCHABLE_EXTENSIONS:
                         filepath = os.path.join(root, file)

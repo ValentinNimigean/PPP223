@@ -1,0 +1,52 @@
+[
+  {
+    "question": "Where is the repository map generated and what method builds it?",
+    "expected_entities": ["RepoMapGenerator", "generate_map"],
+    "expected_files": ["rag/repo_map.py"]
+  },
+  {
+    "question": "How does grep_search format exact code matches?",
+    "expected_entities": ["grep_search", "File:", "Code Snippet"],
+    "expected_files": ["model/tools.py"]
+  },
+  {
+    "question": "Where does evaluation calculate hallucination penalties?",
+    "expected_entities": ["hallucination_penalty", "unexpected_files_mentioned"],
+    "expected_files": ["eval/eval.py"]
+  },
+  {
+    "question": "How are synthetic QA examples generated from repository chunks?",
+    "expected_entities": ["generate_synthetic_data", "TEACHER_SYSTEM"],
+    "expected_files": ["data/synth.py"]
+  },
+  {
+    "question": "Where does the CLI ingest repository chunks before answering questions?",
+    "expected_entities": ["Loader", "HybridRetriever", "ingest_chunks"],
+    "expected_files": ["ui/cli.py"]
+  },
+  {
+    "question": "Which model or client is used to call the local SLM agent?",
+    "expected_entities": ["OpenAI", "base_url", "qwen2.5-coder"],
+    "expected_files": ["model/agent.py"]
+  },
+  {
+    "question": "How does the loader skip unwanted directories?",
+    "expected_entities": ["SKIP_DIRS", "parts", "continue"],
+    "expected_files": ["ingest/loader.py"]
+  },
+  {
+    "question": "Where does the preference generation script choose the chosen and rejected DPO answers?",
+    "expected_entities": ["main", "chosen", "rejected"],
+    "expected_files": ["data/pref_gen.py"]
+  },
+  {
+    "question": "Where is the Streamlit UI entrypoint and what function loads the backend?",
+    "expected_entities": ["streamlit", "load_backend", "st.chat_input"],
+    "expected_files": ["ui/app.py"]
+  },
+  {
+    "question": "Does the repo define a FastAPIRetriever class?",
+    "expected_entities": ["cannot find", "FastAPIRetriever"],
+    "expected_files": []
+  }
+]
