@@ -61,3 +61,29 @@ pytestdebug.log
 # Project specific
 qdrant_storage/
 fastembed_cache/
+unsloth_compiled_cache/
+scratch/
+
+# Generated evaluation and experiment outputs
+/eval_report*.json
+/results/exp_*.json
+/repomix-output.txt
+
+# Training outputs
+/results_sft/
+/results_dpo/
+/results_sft_test/
+
+# Temporary/generated datasets
+/human_feedback.jsonl
+/synthetic_qa_auto.jsonl
+/preference_data_auto.jsonl
+/preference_data_failures*.jsonl
+/test_pref*.jsonl
+
+# Generated dataset artifacts
+/artifacts/*.json
+/artifacts/*.md
+/data/clean/
+/data/curated/
+/data/final/

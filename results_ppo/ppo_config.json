@@ -1,0 +1,14 @@
+{
+  "prompts_path": "data/rlhf_prompts.jsonl",
+  "sft_model": "results_sft/adapter",
+  "reward_model": "results_reward",
+  "base_model": "unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit",
+  "output_dir": "results_ppo",
+  "total_episodes": 1000,
+  "learning_rate": 3e-06,
+  "mini_batch_size": 1,
+  "batch_size": 4,
+  "target_kl": 0.1,
+  "dry_run": true,
+  "uses_trl_ppo_trainer": true
+}

@@ -1,0 +1,16 @@
+{
+  "base_model": "unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit",
+  "dataset_path": "data/final/preferences_train.jsonl",
+  "dataset_hash": "caf43e7fb6edf15714c66ccde54fa114fd46b1ab5bc9eabf177eddc1b8cb3f6d",
+  "eval_dataset_path": "data/final/preferences_val.jsonl",
+  "eval_dataset_hash": "2b9c16c27b80eb3c69090ebf506544b899a77643a2c25b5bc94862fcea2b5022",
+  "selected_backend": "hf_sequence_classification_fallback",
+  "backend_reason": "Installed Unsloth does not expose a stable reward-model classification head in this repo path; using Hugging Face AutoModelForSequenceClassification with PEFT.",
+  "loss_type": "binary_classification_fallback",
+  "max_steps": 200,
+  "learning_rate": 1e-05,
+  "batch_size": 2,
+  "eval_split": 0.1,
+  "max_length": 1024,
+  "dry_run": false
+}

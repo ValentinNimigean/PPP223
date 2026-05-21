@@ -1,22 +1,30 @@
 {
-  "model_id": "unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit",
-  "dataset_path": "synthetic_qa_combined_2048.jsonl",
+  "task": "chat",
+  "base_model": "unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit",
+  "dataset_path": "data/final/sft_train.jsonl",
+  "val_dataset_path": "data/final/sft_val.jsonl",
+  "dataset_hash": "09654ae98566d6eb5cf01193af7c3b302bf2a938128d06169523139eb435403e",
   "output_dir": "results_sft",
-  "epochs": 3,
-  "max_seq_length": 2048,
-  "lora_r": 8,
-  "lora_alpha": 16,
-  "learning_rate": 0.0001,
-  "batch_size": 1,
-  "grad_accum": 8,
-  "eval_split": 0.1,
-  "seed": 3407,
-  "max_samples": null,
+  "hyperparameters": {
+    "epochs": 2,
+    "max_seq_length": 2048,
+    "lora_r": 8,
+    "lora_alpha": 16,
+    "learning_rate": 0.0001,
+    "batch_size": 1,
+    "grad_accum": 16,
+    "eval_split": 0.1,
+    "seed": 3407,
+    "max_samples": null,
+    "dry_run": false
+  },
   "token_audit": {
-    "rows": 31,
-    "max": 107,
-    "mean": 91,
-    "p95": 104,
+    "rows": 404,
+    "max": 548,
+    "mean": 152,
+    "p95": 527,
     "over_limit": 0
-  }
+  },
+  "timestamp": "2026-05-21T21:04:29+00:00",
+  "val_dataset_hash": "dc4f47c978cd00b6b47092bb491cc8eb9213406c7573664fcc62b17a395379b0"
 }

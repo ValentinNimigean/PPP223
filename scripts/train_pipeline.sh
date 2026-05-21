@@ -11,6 +11,10 @@ TEACHER_MODEL="gpt-4o"
 STUDENT_URL=""
 OLLAMA_BASE_MODEL="qwen2.5-coder:1.5b"
 SFT_BASE_MODEL="unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit"
+SFT_TRAIN_DATA="data/final/sft_train.jsonl"
+SFT_VAL_DATA="data/final/sft_val.jsonl"
+PREF_TRAIN_DATA="data/final/preferences_train.jsonl"
+PREF_VAL_DATA="data/final/preferences_val.jsonl"
 
 SKIP_SYNTH=0
 SKIP_SFT=0
@@ -56,12 +60,24 @@ combine_if_exists() {
   echo "Wrote $out with $(wc -l < "$out") rows"
 }
 
+require_file() {
+  local path="$1"
+  if [[ ! -f "$path" ]]; then
+    echo "Missing required dataset: $path"
+    exit 1
+  fi
+}
+
 echo "========================================"
 echo "PPP223 / Mobtrap training pipeline"
 echo "Repo:              $REPO"
 echo "Teacher model:     $TEACHER_MODEL"
 echo "Ollama eval model: $OLLAMA_BASE_MODEL"
 echo "SFT base model:    $SFT_BASE_MODEL"
+echo "SFT train data:    $SFT_TRAIN_DATA"
+echo "SFT val data:      $SFT_VAL_DATA"
+echo "Pref train data:   $PREF_TRAIN_DATA"
+echo "Pref val data:     $PREF_VAL_DATA"
 echo "========================================"
 
 if [[ "$SKIP_EVAL" -eq 0 ]]; then
@@ -80,7 +96,7 @@ fi
 if [[ "$SKIP_SYNTH" -eq 0 ]]; then
   echo ""
   echo "========================================"
-  echo "STEP 1: Generate synthetic SFT data"
+  echo "STEP 1: Generate raw synthetic helper data (not used directly for training)"
   echo "========================================"
   python data/synth.py \
     --repo "$REPO" \
@@ -90,13 +106,15 @@ fi
 
 echo ""
 echo "========================================"
-echo "STEP 2: Combine SFT data"
+echo "STEP 2: Verify final cleaned datasets"
 echo "========================================"
-combine_if_exists synthetic_qa_combined.jsonl \
-  synthetic_qa_seed.jsonl \
-  synthetic_qa_auto.jsonl
-
-python scripts/audit_training_data.py synthetic_qa_combined.jsonl
+require_file "$SFT_TRAIN_DATA"
+require_file "$SFT_VAL_DATA"
+require_file "$PREF_TRAIN_DATA"
+require_file "$PREF_VAL_DATA"
+python scripts/audit_datasets.py \
+  --sft "$SFT_TRAIN_DATA" "$SFT_VAL_DATA" \
+  --preferences "$PREF_TRAIN_DATA" "$PREF_VAL_DATA"
 
 if [[ "$SKIP_SFT" -eq 0 ]]; then
   echo ""
@@ -104,7 +122,8 @@ if [[ "$SKIP_SFT" -eq 0 ]]; then
   echo "STEP 3: Dry-run SFT formatting"
   echo "========================================"
   python model/finetune.py \
-    --data synthetic_qa_combined.jsonl \
+    --data "$SFT_TRAIN_DATA" \
+    --val-data "$SFT_VAL_DATA" \
     --model "$SFT_BASE_MODEL" \
     --out results_sft \
     --dry-run \
@@ -115,14 +134,15 @@ if [[ "$SKIP_SFT" -eq 0 ]]; then
   echo "STEP 4: SFT fine-tuning"
   echo "========================================"
   python model/finetune.py \
-    --data synthetic_qa_combined.jsonl \
+    --data "$SFT_TRAIN_DATA" \
+    --val-data "$SFT_VAL_DATA" \
     --model "$SFT_BASE_MODEL" \
     --out results_sft \
     --epochs 3 \
     --learning-rate 1e-4 \
     --lora-r 8 \
     --lora-alpha 16 \
-    --eval-split 0.1
+    --eval-split 0
 fi
 
 if [[ "$SKIP_EVAL" -eq 0 ]]; then
@@ -143,62 +163,14 @@ fi
 if [[ "$SKIP_DPO" -eq 0 ]]; then
   echo ""
   echo "========================================"
-  echo "STEP 6: Generate preference data"
+  echo "STEP 6: Final preference dataset audit"
   echo "========================================"
-
-  STUDENT_ARG=()
-  if [[ -n "$STUDENT_URL" ]]; then
-    STUDENT_ARG=(--student-url "$STUDENT_URL" --student-model "$OLLAMA_BASE_MODEL")
-    echo "Using student model at $STUDENT_URL for candidate generation."
-  fi
-
-  python data/pref_gen.py \
-    --input synthetic_qa_combined.jsonl \
-    --output preference_data_auto.jsonl \
-    --model "$TEACHER_MODEL" \
-    --judge "$TEACHER_MODEL" \
-    "${STUDENT_ARG[@]}"
+  python -m alignment.validate_preferences "$PREF_TRAIN_DATA"
+  python -m alignment.validate_preferences "$PREF_VAL_DATA"
 
   echo ""
   echo "========================================"
-  echo "STEP 7: Generate failure-driven DPO rows from eval reports"
-  echo "========================================"
-
-  if [[ -f eval_report_base.json ]]; then
-    python data/failure_dpo_from_eval.py \
-      --report eval_report_base.json \
-      --out preference_data_failures_base.jsonl \
-      --threshold 0.75
-  fi
-
-  if [[ -f eval_report_post_codefix_or_base.json ]]; then
-    python data/failure_dpo_from_eval.py \
-      --report eval_report_post_codefix_or_base.json \
-      --out preference_data_failures_post.jsonl \
-      --threshold 0.75
-  fi
-
-  echo ""
-  echo "========================================"
-  echo "STEP 8: Combine preference data"
-  echo "========================================"
-  combine_if_exists preference_data_combined.jsonl \
-    preference_data_auto.jsonl \
-    preference_data_failures_base.jsonl \
-    preference_data_failures_post.jsonl \
-    preference_data_failures_unseen_v2.jsonl
-
-  python scripts/audit_training_data.py preference_data_combined.jsonl
-
-  echo ""
-  echo "========================================"
-  echo "STEP 8b: Validate combined DPO data"
-  echo "========================================"
-  python scripts/validate_dpo.py preference_data_combined.jsonl
-
-  echo ""
-  echo "========================================"
-  echo "STEP 9: DPO training"
+  echo "STEP 7: DPO training baseline on final preference train split"
   echo "========================================"
 
   if [[ ! -d results_sft/adapter ]]; then
@@ -207,7 +179,7 @@ if [[ "$SKIP_DPO" -eq 0 ]]; then
   fi
 
   python model/dpo.py \
-    --dpo-data-path preference_data_combined.jsonl \
+    --dpo-data-path "$PREF_TRAIN_DATA" \
     --out results_dpo \
     --sft-adapter results_sft/adapter \
     --max-steps 200

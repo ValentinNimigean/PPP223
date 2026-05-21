@@ -4,9 +4,11 @@ import logging
 import math
 import re
 from collections import Counter
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List
 
+from ingest.base import ChunkRecord, DocumentRecord
 from ingest.metadata import CodeChunk
+from rag.base import SearchResult
 
 try:
     from qdrant_client import QdrantClient, models
@@ -59,7 +61,7 @@ class HybridRetriever:
         self.qdrant_ready = False
         self.sparse_ready = False
 
-        self._chunks: List[CodeChunk] = []
+        self._records: List[CodeChunk | DocumentRecord] = []
         self._documents: List[str] = []
         self._metadata: List[Dict[str, Any]] = []
         self._doc_tokens: List[Counter[str]] = []
@@ -89,20 +91,43 @@ class HybridRetriever:
 
     @staticmethod
     def _chunk_metadata(chunk: CodeChunk) -> Dict[str, Any]:
-        return {
+        metadata = {
             "filepath": getattr(chunk, "filepath", ""),
             "type": getattr(chunk, "chunk_type", ""),
+            "doc_type": "code",
             "name": getattr(chunk, "name", ""),
             "qualified_name": getattr(chunk, "qualified_name", None),
             "parent_class": getattr(chunk, "parent_class", None),
             "start_line": getattr(chunk, "start_line", None),
             "end_line": getattr(chunk, "end_line", None),
             "signature": getattr(chunk, "signature", ""),
+            "source": getattr(chunk, "filepath", ""),
         }
+        metadata["snippet"] = (getattr(chunk, "text", "") or "")[:240]
+        return metadata
+
+    @staticmethod
+    def _document_metadata(document: DocumentRecord) -> Dict[str, Any]:
+        metadata = dict(getattr(document, "metadata", {}) or {})
+        metadata.setdefault("source", getattr(document, "source", ""))
+        metadata.setdefault("filepath", getattr(document, "source", ""))
+        metadata.setdefault("type", "document")
+        metadata.setdefault("doc_type", getattr(document, "doc_type", "text"))
+        metadata.setdefault("chunk_id", getattr(document, "chunk_id", None))
+        metadata.setdefault("content_hash", metadata.get("content_hash"))
+        metadata["id"] = getattr(document, "id", "")
+        metadata["snippet"] = (getattr(document, "text", "") or "")[:240]
+        return metadata
+
+    @classmethod
+    def _record_metadata(cls, record: CodeChunk | DocumentRecord) -> Dict[str, Any]:
+        if hasattr(record, "filepath") and hasattr(record, "chunk_type"):
+            return cls._chunk_metadata(record)  # type: ignore[arg-type]
+        return cls._document_metadata(record)  # type: ignore[arg-type]
 
     def _rebuild_local_index(self) -> None:
-        self._documents = [chunk.text or "" for chunk in self._chunks]
-        self._metadata = [self._chunk_metadata(chunk) for chunk in self._chunks]
+        self._documents = [getattr(record, "text", "") or "" for record in self._records]
+        self._metadata = [self._record_metadata(record) for record in self._records]
 
         self._doc_tokens = []
         df: Counter[str] = Counter()
@@ -116,6 +141,10 @@ class HybridRetriever:
                     str(meta.get("qualified_name") or ""),
                     str(meta.get("signature") or ""),
                     str(meta.get("type") or ""),
+                    str(meta.get("source") or ""),
+                    str(meta.get("title") or ""),
+                    str(meta.get("row_number") or ""),
+                    str(meta.get("chunk_id") or ""),
                 ]
             )
             counts = Counter(self._tokenize(searchable))
@@ -129,15 +158,15 @@ class HybridRetriever:
             for token, freq in df.items()
         }
 
-    def ingest_chunks(self, chunks: List[CodeChunk]) -> None:
-        self._chunks = list(chunks or [])
+    def ingest_chunks(self, chunks: List[CodeChunk] | List[ChunkRecord]) -> None:
+        self._records = list(chunks or [])
         self._rebuild_local_index()
 
-        if not self._chunks:
+        if not self._records:
             print("No chunks to ingest.")
             return
 
-        print(f"Ingesting {len(self._chunks)} elements into retriever index...")
+        print(f"Ingesting {len(self._records)} elements into retriever index...")
 
         if not self.use_qdrant or self.client is None:
             print("Qdrant unavailable; lexical fallback index is ready.")
@@ -148,7 +177,7 @@ class HybridRetriever:
                 collection_name=self.collection_name,
                 documents=self._documents,
                 metadata=self._metadata,
-                ids=list(range(len(self._chunks))),
+                ids=list(range(len(self._records))),
             )
             self.qdrant_ready = True
             print("Qdrant ingestion complete.")
@@ -157,7 +186,35 @@ class HybridRetriever:
             logger.warning("Qdrant ingestion failed; using lexical fallback only: %s", exc)
             print(f"Qdrant ingestion failed; lexical fallback index is ready: {exc}")
 
-    def _format_qdrant_point(self, point: Any) -> Dict[str, Any]:
+    def ingest_documents(self, documents: List[DocumentRecord]) -> None:
+        self._records = list(documents or [])
+        self._rebuild_local_index()
+
+        if not self._records:
+            print("No documents to ingest.")
+            return
+
+        print(f"Ingesting {len(self._records)} documents into retriever index...")
+
+        if not self.use_qdrant or self.client is None:
+            print("Qdrant unavailable; lexical fallback index is ready.")
+            return
+
+        try:
+            self.client.add(
+                collection_name=self.collection_name,
+                documents=self._documents,
+                metadata=self._metadata,
+                ids=list(range(len(self._records))),
+            )
+            self.qdrant_ready = True
+            print("Qdrant ingestion complete.")
+        except Exception as exc:
+            self.qdrant_ready = False
+            logger.warning("Qdrant ingestion failed; using lexical fallback only: %s", exc)
+            print(f"Qdrant ingestion failed; lexical fallback index is ready: {exc}")
+
+    def _format_qdrant_point(self, point: Any) -> SearchResult:
         payload = point.payload or {}
         doc_text = payload.get("document", "")
 
@@ -166,11 +223,12 @@ class HybridRetriever:
 
         return {
             "document": doc_text,
+            "snippet": payload.get("snippet", doc_text[:240]),
             "metadata": metadata,
             "score": float(getattr(point, "score", 0.0) or 0.0),
         }
 
-    def _search_qdrant_hybrid(self, query: str, limit: int) -> List[Dict[str, Any]]:
+    def _search_qdrant_hybrid(self, query: str, limit: int) -> List[SearchResult]:
         if not self.qdrant_ready or self.client is None or models is None:
             return []
 
@@ -202,6 +260,9 @@ class HybridRetriever:
         qualified_name = str(meta.get("qualified_name") or "").lower()
         filepath = str(meta.get("filepath") or "").lower()
         signature = str(meta.get("signature") or "").lower()
+        source = str(meta.get("source") or "").lower()
+        title = str(meta.get("title") or "").lower()
+        chunk_id = str(meta.get("chunk_id") or "").lower()
         doc_lower = (doc or "").lower()
 
         if not query_text:
@@ -215,6 +276,12 @@ class HybridRetriever:
             score += 10.0
         if query_text in signature:
             score += 8.0
+        if query_text in source:
+            score += 7.0
+        if query_text in title:
+            score += 7.0
+        if query_text in chunk_id:
+            score += 5.0
         if query_text in doc_lower:
             score += 6.0
 
@@ -229,11 +296,17 @@ class HybridRetriever:
                 score += 4.0
             if token in signature:
                 score += 3.0
+            if token in source:
+                score += 3.0
+            if token in title:
+                score += 3.0
+            if token in chunk_id:
+                score += 2.0
 
         return score
 
-    def _search_local(self, query: str, limit: int) -> List[Dict[str, Any]]:
-        if not self._chunks:
+    def _search_local(self, query: str, limit: int) -> List[SearchResult]:
+        if not self._records:
             return []
 
         query_text = " ".join(self._tokenize(query))
@@ -243,7 +316,7 @@ class HybridRetriever:
 
         query_counts = Counter(query_tokens)
         avg_len = max(sum(sum(c.values()) for c in self._doc_tokens) / max(len(self._doc_tokens), 1), 1.0)
-        scored: List[Dict[str, Any]] = []
+        scored: List[SearchResult] = []
 
         for idx, (doc, meta, doc_counts) in enumerate(zip(self._documents, self._metadata, self._doc_tokens)):
             score = self._field_boost(query_text, query_tokens, meta, doc)
@@ -265,6 +338,7 @@ class HybridRetriever:
                 scored.append(
                     {
                         "document": doc,
+                        "snippet": doc[:240],
                         "metadata": meta,
                         "score": float(score),
                     }
@@ -279,13 +353,14 @@ class HybridRetriever:
         return [
             {
                 "document": doc,
+                "snippet": doc[:240],
                 "metadata": meta,
                 "score": 0.0,
             }
             for doc, meta in list(zip(self._documents, self._metadata))[:limit]
         ]
 
-    def search(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    def search(self, query: str, limit: int = 5) -> List[SearchResult]:
         query = query or ""
         limit = max(int(limit or 5), 1)
 

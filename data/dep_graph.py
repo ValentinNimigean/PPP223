@@ -5,6 +5,31 @@ import os
 import tempfile
 from typing import Optional
 
+
+SKIP_DIRS = frozenset({
+    "__pycache__",
+    ".git",
+    ".venv",
+    "venv",
+    "node_modules",
+    "site-packages",
+    "dist-packages",
+    "unsloth_compiled_cache",
+    "qdrant_storage",
+    "fastembed_cache",
+    "scratch",
+    ".eggs",
+    "build",
+    "dist",
+    ".pytest_cache",
+    "artifacts",
+    "clean",
+    "curated",
+    "final",
+    "results_sft",
+    "results_dpo",
+})
+
 class IntraFileVisitor(ast.NodeVisitor):
     def __init__(self):
         self.calls = []
@@ -61,7 +86,10 @@ class DependencyGraph:
                 print(f"Warning: pkg_dir {self.pkg_dir} does not exist.")
                 return
 
-            for root, _, files in os.walk(self.pkg_dir):
+            for root, dirs, files in os.walk(self.pkg_dir):
+                dirs[:] = [directory for directory in dirs if directory not in SKIP_DIRS]
+                if any(part in SKIP_DIRS for part in root.split(os.sep)):
+                    continue
                 for file in files:
                     if file.endswith(".py"):
                         filepath = os.path.join(root, file)

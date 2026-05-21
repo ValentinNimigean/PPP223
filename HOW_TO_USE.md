@@ -4,7 +4,7 @@
 
 This project is an agentic, Small Language Model (SLM)-based codebase assistant designed for deep Python code understanding. Instead of relying on naive character-count text chunking, it parses Python repositories structurally using Abstract Syntax Tree (AST) definitions (falling back to tree-sitter when needed). It constructs a unified "Repo Map" that outlines classes, methods, and functions, allowing the model to quickly navigate files and contextually resolve hierarchical symbols.
 
-The core pipeline features structural codebase ingestion, high-fidelity hybrid retrieval (combining dense vector Qdrant embeddings and lexical BM25 fallback), and an agentic loop with native tool access (`grep_search` and `semantic_search`). Additionally, it includes full pipelines for dataset compilation (synthetic reasoning generation), model evaluation, toxicity/hallucination checks, and alignment via Supervised Fine-Tuning (SFT) and Direct Preference Optimization (DPO).
+The core pipeline features structural codebase ingestion, high-fidelity hybrid retrieval (combining dense vector Qdrant embeddings and lexical BM25 fallback), and an agentic loop with native tool access (`grep_search` and `semantic_search`). Additionally, it includes full pipelines for dataset compilation (synthetic reasoning generation), model evaluation, toxicity/hallucination checks, and alignment via Supervised Fine-Tuning (SFT) and PPO-based RLHF. DPO remains available only as an optional baseline.
 
 ## 2. Requirements
 
@@ -31,7 +31,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-If you plan to run local fine-tuning or DPO alignment, install the training dependencies:
+If you plan to run local fine-tuning or PPO/DPO alignment, install the training dependencies:
 ```bash
 pip install -r requirements-train-local.txt
 ```
@@ -98,6 +98,39 @@ For an interactive, loop-based terminal experience, run the CLI:
 python ui/cli.py --repo .
 ```
 You can type questions continuously. To exit the interactive session, type `exit` or `quit`.
+
+For a one-shot CLI question using the default Ollama backend:
+```bash
+python -m ui.cli --repo . --question "What class handles hybrid vector search?"
+```
+
+You can also select the backend explicitly:
+```bash
+python -m ui.cli --repo . --backend ollama --question "What class handles hybrid vector search?"
+```
+
+To run inference with a fine-tuned LoRA/PEFT adapter instead of Ollama:
+```bash
+python -m ui.cli \
+  --repo . \
+  --backend hf-peft \
+  --base-model Qwen/Qwen2.5-Coder-3B-Instruct \
+  --adapter-path results_dpo/adapter \
+  --question "What class handles hybrid vector search?"
+```
+
+### CLI backend notes
+* `--backend ollama` is the default and preserves the existing OpenAI-compatible Ollama path.
+* `--backend hf-peft` requires `--adapter-path`.
+* `--device auto` is recommended for local adapter inference because it allows Hugging Face to choose a safe device map automatically.
+* If `hf-peft` import fails, install the local inference stack:
+  ```bash
+  pip install transformers peft accelerate
+  ```
+* Some quantized setups may also need:
+  ```bash
+  pip install bitsandbytes
+  ```
 
 ## 8. Use a different repository
 
@@ -187,70 +220,40 @@ python eval/eval.py \
 The codebase includes full support for parameter-efficient fine-tuning (PEFT) using **Unsloth QLoRA**.
 * **Base Model:** `unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit` (a lightweight, instruct-aligned fallback).
 * **Target Output Directory:** `results_sft/adapter`
-* **GPU Context Limit:** To avoid out-of-memory errors on small GPUs (e.g., 4-6GB VRAM), we filter the SFT dataset to a **2048-token safe limit**.
+* **Training inputs:** Always train from the cleaned final splits, not the raw synthetic helper files.
 
 ### Fine-Tuning Pipeline Steps:
 
-1. **Build the seed dataset and combine synthetic Q&A data:**
+1. **Prepare the cleaned final datasets:**
    ```bash
-   python build_seed_dataset.py
-   cp synthetic_qa_seed.jsonl synthetic_qa_combined.jsonl
+   python scripts/clean_datasets.py
+   python scripts/split_datasets.py
    ```
 
-2. **Audit dataset files to ensure strict data hygiene:**
+2. **Audit the final SFT and preference splits before training:**
    ```bash
-   python scripts/audit_training_data.py synthetic_qa_combined.jsonl
+   python scripts/audit_datasets.py \
+     --sft data/final/sft_train.jsonl data/final/sft_val.jsonl \
+     --preferences data/final/preferences_train.jsonl data/final/preferences_val.jsonl
    ```
 
-3. **Generate the 2048-safe dataset filter:**
-   ```bash
-   python - <<'PY'
-   import json
-   from pathlib import Path
-   from transformers import AutoTokenizer
-
-   src = Path("synthetic_qa_combined.jsonl")
-   dst = Path("synthetic_qa_combined_2048.jsonl")
-   tok = AutoTokenizer.from_pretrained("unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit")
-
-   kept = dropped = 0
-   max_kept = 0
-
-   with src.open() as f, dst.open("w") as out:
-       for line in f:
-           row = json.loads(line)
-           text = tok.apply_chat_template(
-               row["messages"],
-               tokenize=False,
-               add_generation_prompt=False,
-           )
-           n = len(tok.encode(text))
-           if n <= 2048:
-               out.write(json.dumps(row, ensure_ascii=False) + "\n")
-               kept += 1
-               max_kept = max(max_kept, n)
-           else:
-               dropped += 1
-
-   print(f"kept={kept}, dropped={dropped}, max_kept={max_kept}, wrote={dst}")
-   PY
-   ```
-
-4. **Execute a dry-run token audit to verify training constraints:**
+3. **Execute a dry-run token audit to verify training constraints:**
    ```bash
    python model/finetune.py \
-     --data synthetic_qa_combined_2048.jsonl \
+     --data data/final/sft_train.jsonl \
+     --val-data data/final/sft_val.jsonl \
      --model unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit \
      --out results_sft \
      --dry-run \
      --max-seq-length 2048
    ```
 
-5. **Train the SFT model adapter:**
+4. **Train the SFT model adapter:**
    ```bash
    PYTORCH_ALLOC_CONF=expandable_segments:True \
    python model/finetune.py \
-     --data synthetic_qa_combined_2048.jsonl \
+     --data data/final/sft_train.jsonl \
+     --val-data data/final/sft_val.jsonl \
      --model unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit \
      --out results_sft \
      --epochs 3 \
@@ -259,11 +262,11 @@ The codebase includes full support for parameter-efficient fine-tuning (PEFT) us
      --lora-alpha 16 \
      --batch-size 1 \
      --grad-accum 8 \
-     --eval-split 0.1 \
+     --eval-split 0 \
      --max-seq-length 2048
    ```
 
-6. **Verify the generated adapter files:**
+5. **Verify the generated adapter files:**
    ```bash
    ls -lah results_sft/adapter
    cat results_sft/training_config.json
@@ -271,9 +274,9 @@ The codebase includes full support for parameter-efficient fine-tuning (PEFT) us
 
 *Note: The live Streamlit app communicates with the base Ollama model directly. The fine-tuned adapter is stored under `results_sft/adapter` and is not loaded by the Streamlit UI unless the adapter is explicitly merged/exported, or served via an adapter-aware Ollama/vLLM backend.*
 
-## 12. DPO / RLHF-style preference optimization
+## 12. Optional DPO Baseline
 
-To minimize toxic reflexes, hallucinations, and vague responses, the codebase supports Direct Preference Optimization (DPO).
+PPO-based RLHF is the main alignment path in this repository. Direct Preference Optimization (DPO) is kept only as an optional baseline.
 * **Pre-requisite:** DPO must be run *after* completing the SFT adapter step.
 * **Important Safety Rule:** You must validate preference data before training to ensure there is no data contamination.
 
@@ -281,14 +284,15 @@ To minimize toxic reflexes, hallucinations, and vague responses, the codebase su
 
 1. **Validate the preference dataset:**
    ```bash
-   python scripts/validate_dpo.py preference_data_combined.jsonl
+   python -m alignment.validate_preferences data/final/preferences_train.jsonl
+   python -m alignment.validate_preferences data/final/preferences_val.jsonl
    ```
 
 2. **Launch DPO training:**
    ```bash
    python model/dpo.py \
      --model Qwen/Qwen2.5-Coder-1.5B-Instruct \
-     --dpo-data-path preference_data_combined.jsonl \
+     --dpo-data-path data/final/preferences_train.jsonl \
      --out results_dpo \
      --sft-adapter results_sft/adapter \
      --max-steps 200
@@ -299,15 +303,18 @@ To minimize toxic reflexes, hallucinations, and vague responses, the codebase su
 
 ## 13. Data hygiene checks
 
-Data hygiene scripts keep toxic or hallucinated artifacts from contaminating your model. It is critical to execute these checks before running SFT or DPO processes:
+Data hygiene scripts keep toxic or hallucinated artifacts from contaminating your model. It is critical to execute these checks before running SFT, reward-model, PPO, or optional DPO processes:
 ```bash
-python scripts/audit_training_data.py synthetic_qa_seed.jsonl synthetic_qa_combined.jsonl synthetic_qa_combined_2048.jsonl
-python scripts/validate_dpo.py preference_data_combined.jsonl
+python scripts/audit_datasets.py \
+  --sft data/final/sft_train.jsonl data/final/sft_val.jsonl \
+  --preferences data/final/preferences_train.jsonl data/final/preferences_val.jsonl
+python -m alignment.validate_preferences data/final/preferences_train.jsonl
+python -m alignment.validate_preferences data/final/preferences_val.jsonl
 ```
 
 ### Purpose of Hygiene Scripts:
-* `audit_training_data.py`: Automatically scans training datasets, rejecting any files that contain absolute local paths (e.g., `/home/...`), `file://` URLs, or toxic/contaminated terms. Rejections exit with a code `1` to stop downstream automation pipelines.
-* `validate_dpo.py`: Ensures preference data pairs are aligned properly, weeding out corrupt labels, toxic prompt anomalies, and vague chosen/rejected text constructs.
+* `audit_datasets.py`: Audits the final SFT and preference splits for duplicates, empty answers, malformed rows, contamination, and split-readiness. Rejections exit with a code `1` to stop downstream automation pipelines.
+* `alignment.validate_preferences`: Ensures preference pairs are aligned properly, weeding out corrupt labels, toxic prompt anomalies, and vague chosen/rejected text constructs.
 
 ## 14. Troubleshooting
 
@@ -321,7 +328,7 @@ If you see an error warning that the local Ollama backend is not accessible:
 
 ### CUDA out of memory during fine-tuning
 If fine-tuning crashes with an Out-of-Memory (OOM) error:
-1. Ensure you are using the pre-filtered `synthetic_qa_combined_2048.jsonl` dataset.
+1. Ensure you are using `data/final/sft_train.jsonl` and `data/final/sft_val.jsonl`, not the raw synthetic helper datasets.
 2. Reduce the sequence length and gradient accumulation.
 3. Lower the LoRA rank/alpha parameters.
 
@@ -329,7 +336,8 @@ Use this optimized, low-memory fallback configuration:
 ```bash
 PYTORCH_ALLOC_CONF=expandable_segments:True \
 python model/finetune.py \
-  --data synthetic_qa_combined_2048.jsonl \
+  --data data/final/sft_train.jsonl \
+  --val-data data/final/sft_val.jsonl \
   --model unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit \
   --out results_sft \
   --epochs 3 \
