@@ -127,7 +127,7 @@ def build_dpo_trainer(model, tokenizer, dpo_cfg, train_dataset, eval_dataset, pe
 
 def run_dpo(
     model_id: Optional[str] = None,
-    dpo_data_path: str = "preference_data.jsonl",
+    dpo_data_path: str = "training_data/preferences/preference_data_combined.jsonl",
     output_dir: str = "dpo_results",
     sft_adapter_path: Optional[str] = None,
     max_length: int = 2048,
@@ -280,7 +280,7 @@ def run_dpo(
 def main():
     parser = argparse.ArgumentParser(description="Run DPO for code-understanding SLM alignment.")
     parser.add_argument("--model", type=str, default=None, help="Base model ID. If omitted, infer from SFT adapter or use 1.5B default.")
-    parser.add_argument("--dpo-data-path", type=str, default="preference_data.jsonl")
+    parser.add_argument("--dpo-data-path", type=str, default="training_data/preferences/preference_data_combined.jsonl")
     parser.add_argument("--out", type=str, default="dpo_results")
     parser.add_argument("--sft-adapter", type=str, default=None)
     parser.add_argument("--max-length", type=int, default=2048)

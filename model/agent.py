@@ -2,19 +2,16 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from openai import OpenAI
 
-from ingest.base import ChunkRecord
+from eval.hallucination import HallucinationDetector
+from eval.toxicity import ToxicityDetector
 from ingest.metadata import CodeChunk
-from model.base import ChatInferenceBackend, ChatMessage
 from model.tools import AgentTools
-from rag.base import RetrieverProtocol
-from safety.guardrails import GuardrailResult, evaluate_guardrails
-from safety.hallucination import HallucinationDetector
-from safety.toxicity import ToxicityDetector
 
 logger = logging.getLogger(__name__)
 
@@ -24,36 +21,29 @@ class SLMAgent:
         self,
         repo_map_string: str = "",
         base_url: str = "http://localhost:11434/v1",
-        model: str = "qwen2.5-coder:3b",
+        model: str = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b"),
         hallucination_check: bool = False,
         enable_deterministic_shortcuts: bool = True,
         enable_tool_result_templates: bool = True,
-        inference_engine: ChatInferenceBackend | None = None,
     ):
-        self.client = None
-        if inference_engine is None:
-            self.client = OpenAI(
-                base_url=base_url,
-                api_key="ollama-local",
-            )
+        self.client = OpenAI(
+            base_url=base_url,
+            api_key="ollama-local",
+        )
         self.model = model
         self.repo_map = repo_map_string
-        self.retriever: RetrieverProtocol | None = None
+        self.retriever = None
         self.hallucination_check = hallucination_check
         self._chunks: List[CodeChunk] = []
         self._detector = None
         self._toxicity_detector = ToxicityDetector()
         self.enable_deterministic_shortcuts = enable_deterministic_shortcuts
         self.enable_tool_result_templates = enable_tool_result_templates
-        self.inference_engine = inference_engine
-        self.base_url = base_url
-        self.last_guardrail_result: GuardrailResult | None = None
-        self._current_user_prompt: str = ""
 
-    def set_retriever(self, retriever: RetrieverProtocol | None) -> None:
+    def set_retriever(self, retriever) -> None:
         self.retriever = retriever
 
-    def set_chunks(self, chunks: List[CodeChunk] | List[ChunkRecord]) -> None:
+    def set_chunks(self, chunks: List[CodeChunk]) -> None:
         self._chunks = chunks or []
         if self.hallucination_check:
             self._detector = HallucinationDetector(self._chunks)
@@ -316,110 +306,31 @@ class SLMAgent:
 
         return None
 
-    @staticmethod
-    def _strip_line_ref(filepath: str) -> str:
-        return re.sub(r"#L\d+(?:-L\d+)?$", "", filepath or "")
+    def _maybe_add_hallucination_warning(self, final_content: str) -> str:
+        toxicity_scan = self._toxicity_detector.scan(final_content)
+        logger.debug(self._toxicity_detector.format_report(toxicity_scan))
 
-    def _tool_result_evidence(self, tool_result: str) -> Tuple[List[str], List[str]]:
-        allowed_files = []
-        allowed_entities = []
-        for match in re.finditer(r"File:\s*([^|\n]+)\s*\|\s*Name:\s*([^|\n]+)", tool_result or ""):
-            allowed_files.append(self._strip_line_ref(match.group(1).strip()).lower())
-            allowed_entities.append(match.group(2).strip().lower())
-        for filepath, _line, content in re.findall(r"^([^:\n]+):(\d+):(.*)$", tool_result or "", flags=re.MULTILINE):
-            allowed_files.append(self._strip_line_ref(filepath.strip()).lower())
-            name_match = re.search(r"(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)", content)
-            if name_match:
-                allowed_entities.append(name_match.group(1).strip().lower())
-        return sorted(set(allowed_entities)), sorted(set(allowed_files))
+        if toxicity_scan["risk"] in {"high", "medium"}:
+            return (
+                "The generated response was blocked because it appeared to contain "
+                "high-risk toxic language."
+            )
 
-    def _regenerate_with_strict_evidence(
-        self,
-        unsafe_response: str,
-        allowed_entities: Optional[Iterable[str]] = None,
-        allowed_files: Optional[Iterable[str]] = None,
-    ) -> str:
-        evidence_lines = []
-        if allowed_files:
-            evidence_lines.append("Allowed files: " + ", ".join(sorted(set(str(item) for item in allowed_files))))
-        if allowed_entities:
-            evidence_lines.append("Allowed entities: " + ", ".join(sorted(set(str(item) for item in allowed_entities))))
-        evidence_text = "\n".join(evidence_lines) if evidence_lines else "Use only repository evidence you can verify."
-        messages = [
-            {"role": "system", "content": self._build_system_prompt()},
-            {"role": "user", "content": self._current_user_prompt},
-            {
-                "role": "assistant",
-                "content": unsafe_response,
-            },
-            {
-                "role": "user",
-                "content": (
-                    "Your previous answer was unsafe or unsupported. "
-                    "Regenerate the answer using only verified repository evidence. "
-                    "If the evidence is insufficient, say you cannot verify it.\n\n"
-                    f"{evidence_text}"
-                ),
-            },
-        ]
-        if self.inference_engine is not None:
-            return self._model_response_text(messages) or ""
-
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-        )
-        return response.choices[0].message.content or ""
-
-    def _honest_fallback(self, result: GuardrailResult) -> str:
-        if result.reason == "toxic_output":
-            return "I cannot provide that answer safely. Please rephrase the request in a neutral, non-abusive way."
-        details = []
-        if result.unsupported_files:
-            details.append("unsupported files: " + ", ".join(result.unsupported_files))
-        if result.unsupported_entities:
-            details.append("unsupported entities: " + ", ".join(result.unsupported_entities))
-        suffix = f" ({'; '.join(details)})" if details else ""
-        return f"I cannot verify that answer from the available evidence{suffix}."
-
-    def _maybe_add_hallucination_warning(
-        self,
-        final_content: str,
-        *,
-        allowed_entities: Optional[Iterable[str]] = None,
-        allowed_files: Optional[Iterable[str]] = None,
-        allow_regeneration: bool = True,
-    ) -> str:
-        result = evaluate_guardrails(
-            final_content,
-            toxicity_detector=self._toxicity_detector,
-            hallucination_detector=self._detector,
-            allowed_entities=allowed_entities,
-            allowed_files=allowed_files,
-        )
-        self.last_guardrail_result = result
-
-        if result.allowed:
+        if self._detector is None:
             return final_content
 
-        if allow_regeneration:
-            regenerated = self._regenerate_with_strict_evidence(
-                final_content,
-                allowed_entities=allowed_entities,
-                allowed_files=allowed_files,
-            )
-            second = evaluate_guardrails(
-                regenerated,
-                toxicity_detector=self._toxicity_detector,
-                hallucination_detector=self._detector,
-                allowed_entities=allowed_entities,
-                allowed_files=allowed_files,
-            )
-            self.last_guardrail_result = second
-            if second.allowed:
-                return regenerated
+        scan = self._detector.scan(final_content)
+        logger.debug(self._detector.format_report(scan))
 
-        return self._honest_fallback(self.last_guardrail_result or result)
+        if scan["hallucination_risk"] == "high":
+            warning = (
+                f"\n\n⚠️ Hallucination Warning: "
+                f"{len(scan['unverified_entities'])} unverified entities detected: "
+                f"{scan['unverified_entities']}"
+            )
+            return final_content + warning
+
+        return final_content
 
     def _forced_tool_for_query(self, user_prompt: str) -> Optional[Tuple[str, Dict[str, Any]]]:
         if not user_prompt:
@@ -869,49 +780,11 @@ class SLMAgent:
             "If the repository evidence is insufficient, say you cannot find it. Do not invent files, classes, methods, or line numbers."
         )
 
-    def _model_response_text(self, messages: List[Dict[str, Any]]) -> str:
-        """Generate a plain assistant response from the active inference backend."""
-        if self.inference_engine is not None:
-            return self.inference_engine.generate(messages)
-        raise RuntimeError("No local inference engine is attached.")
-
-    def _next_model_step(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]):
-        """Return the next model step from either OpenAI/Ollama or a local engine."""
-        if self.inference_engine is not None:
-            content = self._model_response_text(messages)
-            return {"content": content or "", "tool_calls": []}
-
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-        )
-        msg = response.choices[0].message
-        msg_dict = msg.model_dump()
-        return {
-            "content": msg.content or "",
-            "tool_calls": list(msg.tool_calls or []),
-            "message_dict": {
-                k: v for k, v in msg_dict.items() if v is not None or k == "content"
-            },
-        }
-
     def ask(self, user_prompt: str, max_turns: int = 8) -> str:
         logger.debug("[Agent] Thinking about: %s", user_prompt)
-        self._current_user_prompt = user_prompt or ""
-        self.last_guardrail_result = None
 
         toxicity_block = self._check_input_toxicity(user_prompt)
         if toxicity_block:
-            self.last_guardrail_result = GuardrailResult(
-                allowed=False,
-                reason="toxic_input",
-                toxicity_score=1.0,
-                hallucination_score=0.0,
-                toxicity_risk="high",
-                hallucination_risk="low",
-            )
             return toxicity_block
 
         if self.enable_deterministic_shortcuts:
@@ -928,12 +801,7 @@ class SLMAgent:
             name, args = forced_tool
             tool_result = self._execute_tool_by_name(name, args)
             final = self._summarize_forced_tool_result(user_prompt, name, args, tool_result)
-            evidence_entities, evidence_files = self._tool_result_evidence(tool_result)
-            return self._maybe_add_hallucination_warning(
-                final,
-                allowed_entities=evidence_entities,
-                allowed_files=evidence_files,
-            )
+            return self._maybe_add_hallucination_warning(final)
 
         # Deterministic path for explicit grep_search requests.
         direct_grep_args = self._parse_direct_grep_request(user_prompt)
@@ -944,12 +812,7 @@ class SLMAgent:
                 f"in directory `{direct_grep_args.get('directory', '.')}`.\n\n"
                 f"```text\n{tool_result}\n```"
             )
-            evidence_entities, evidence_files = self._tool_result_evidence(tool_result)
-            return self._maybe_add_hallucination_warning(
-                final_content,
-                allowed_entities=evidence_entities,
-                allowed_files=evidence_files,
-            )
+            return self._maybe_add_hallucination_warning(final_content)
 
         messages = [
             {"role": "system", "content": self._build_system_prompt()},
@@ -962,18 +825,19 @@ class SLMAgent:
 
         try:
             for _turn in range(max_turns):
-                step = self._next_model_step(messages, tools)
-                content = step.get("content", "") or ""
-                tool_calls = step.get("tool_calls", []) or []
-                message_dict = step.get("message_dict")
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="auto",
+                )
 
-                if message_dict is not None:
-                    messages.append(message_dict)
-                else:
-                    messages.append({"role": "assistant", "content": content})
+                msg = response.choices[0].message
+                msg_dict = msg.model_dump()
+                messages.append({k: v for k, v in msg_dict.items() if v is not None or k == "content"})
 
-                if tool_calls:
-                    for tool_call in tool_calls:
+                if msg.tool_calls:
+                    for tool_call in msg.tool_calls:
                         tool_result = self._execute_tool(tool_call)
                         last_tool_name = tool_call.function.name
                         last_tool_result = str(tool_result)
@@ -989,6 +853,8 @@ class SLMAgent:
 
                     logger.debug("[Agent] Tool results gathered. Continuing reasoning.")
                     continue
+
+                content = msg.content or ""
 
                 parsed_tool = self._parse_text_tool_call(content)
                 if parsed_tool:
@@ -1020,12 +886,7 @@ class SLMAgent:
                     if self.enable_tool_result_templates:
                         deterministic = self._deterministic_answer_from_tool_result(user_prompt, name, tool_result)
                         if deterministic:
-                            evidence_entities, evidence_files = self._tool_result_evidence(tool_result)
-                            return self._maybe_add_hallucination_warning(
-                                deterministic,
-                                allowed_entities=evidence_entities,
-                                allowed_files=evidence_files,
-                            )
+                            return self._maybe_add_hallucination_warning(deterministic)
 
                     messages.append(
                         {
@@ -1053,36 +914,18 @@ class SLMAgent:
                     )
 
                 if content.strip():
-                    evidence_entities: List[str] = []
-                    evidence_files: List[str] = []
-                    if last_tool_result:
-                        evidence_entities, evidence_files = self._tool_result_evidence(last_tool_result)
-                    return self._maybe_add_hallucination_warning(
-                        content,
-                        allowed_entities=evidence_entities or None,
-                        allowed_files=evidence_files or None,
-                    )
+                    return self._maybe_add_hallucination_warning(content)
 
             if self.enable_tool_result_templates and last_tool_name and last_tool_result:
                 deterministic = self._deterministic_answer_from_tool_result(user_prompt, last_tool_name, last_tool_result)
                 if deterministic:
-                    evidence_entities, evidence_files = self._tool_result_evidence(last_tool_result)
-                    return self._maybe_add_hallucination_warning(
-                        deterministic,
-                        allowed_entities=evidence_entities,
-                        allowed_files=evidence_files,
-                    )
+                    return self._maybe_add_hallucination_warning(deterministic)
 
             return f"Agent exceeded maximum turns ({max_turns}) without reaching a final answer."
 
         except Exception as exc:
             logger.exception("Agent execution error")
-            backend_label = (
-                f"local inference engine `{type(self.inference_engine).__name__}`"
-                if self.inference_engine is not None
-                else f"Ollama/OpenAI-compatible endpoint for model `{self.model}` at {self.base_url}"
-            )
             return (
                 f"Agent Execution Error: {exc}\n"
-                f"(Make sure the configured backend is available: {backend_label})"
+                f"(Make sure Ollama is running for model `{self.model}` at {self.client.base_url})"
             )

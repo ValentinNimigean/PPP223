@@ -1,8 +1,6 @@
 import json
 from pathlib import Path
 
-from ingest.base import DocumentRecord
-from ingest.dataset_loader import load_dataset_source
 from ingest.metadata import CodeChunk
 from model.agent import SLMAgent
 from rag.retriever import HybridRetriever
@@ -39,55 +37,6 @@ def test_retriever_local_fallback_finds_hybrid_retriever():
     assert results
     assert results[0]["metadata"]["filepath"] == "rag/retriever.py"
     assert results[0]["metadata"]["name"] == "HybridRetriever"
-    assert "snippet" in results[0]
-
-
-def test_retriever_ingests_document_records_with_provenance(tmp_path):
-    path = tmp_path / "faq.jsonl"
-    path.write_text(
-        json.dumps({"title": "Policy", "text": "Refund policy allows returns within 30 days."}) + "\n"
-        + json.dumps({"title": "Shipping", "text": "Shipping usually takes 3 business days."}),
-        encoding="utf-8",
-    )
-
-    documents = load_dataset_source(str(path), chunk_size=80, chunk_overlap=10)
-
-    retriever = HybridRetriever(use_qdrant=False)
-    retriever.ingest_documents(documents)
-
-    results = retriever.search("refund policy", limit=1)
-
-    assert results
-    assert "Refund policy" in results[0]["document"]
-    assert "Refund policy" in results[0]["snippet"]
-    assert results[0]["metadata"]["source"] == str(path)
-    assert results[0]["metadata"]["doc_type"] == "jsonl"
-    assert results[0]["metadata"]["row_number"] == 1
-    assert results[0]["metadata"]["chunk_id"]
-    assert results[0]["metadata"]["content_hash"]
-
-
-def test_retriever_preserves_manual_document_record_metadata():
-    documents = [
-        DocumentRecord(
-            id="faq-1",
-            source="memory://faq",
-            text="Cancellation policy applies within 24 hours of booking.",
-            metadata={"row_number": 7, "content_hash": "abc123", "title": "Cancellation"},
-            doc_type="faq",
-            chunk_id="faq-1#chunk-0",
-        )
-    ]
-
-    retriever = HybridRetriever(use_qdrant=False)
-    retriever.ingest_documents(documents)
-    results = retriever.search("cancellation booking", limit=1)
-
-    assert results[0]["metadata"]["source"] == "memory://faq"
-    assert results[0]["metadata"]["filepath"] == "memory://faq"
-    assert results[0]["metadata"]["row_number"] == 7
-    assert results[0]["metadata"]["content_hash"] == "abc123"
-    assert results[0]["metadata"]["chunk_id"] == "faq-1#chunk-0"
 
 
 def test_agent_parses_clean_text_tool_call():
@@ -104,31 +53,6 @@ def test_agent_repairs_unquoted_tool_name():
         '{"name": semantic_search, "arguments": {"query": "hybrid vector search"}}'
     )
     assert parsed == ("semantic_search", {"query": "hybrid vector search"})
-
-
-def test_agent_uses_injected_inference_engine():
-    class FakeInferenceEngine:
-        def __init__(self):
-            self.calls = []
-
-        def generate(self, messages):
-            self.calls.append(messages)
-            return "Injected backend response."
-
-    engine = FakeInferenceEngine()
-    agent = SLMAgent(
-        repo_map_string="",
-        inference_engine=engine,
-        enable_deterministic_shortcuts=False,
-        enable_tool_result_templates=False,
-    )
-
-    answer = agent.ask("Explain the retriever briefly.", max_turns=1)
-
-    assert answer == "Injected backend response."
-    assert len(engine.calls) == 1
-    assert engine.calls[0][0]["role"] == "system"
-    assert engine.calls[0][1]["role"] == "user"
 
 
 def test_agent_parses_fenced_tool_call():

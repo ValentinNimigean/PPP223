@@ -351,7 +351,8 @@ def build_seed():
     print(f"Total structured examples: {len(all_examples)}")
     assert len(all_examples) == 42, f"Expected 42 lines, got {len(all_examples)}"
     
-    output_path = "synthetic_qa_seed.jsonl"
+    os.makedirs(os.path.join("training_data", "sft"), exist_ok=True)
+    output_path = os.path.join("training_data", "sft", "synthetic_qa_seed.jsonl")
     with open(output_path, "w", encoding="utf-8") as out:
         for example in all_examples:
             out.write(json.dumps(example) + "\n")

@@ -1,0 +1,30 @@
+{
+  "output": {
+    "filePath": "repomix-output.txt",
+    "style": "xml",
+    "removeComments": false,
+    "removeEmptyLines": false,
+    "topFilesLength": 5,
+    "showLineNumbers": false,
+    "copyToClipboard": false,
+    "includeEmptyDirectories": false
+  },
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      "repomix-output.txt",
+      "repomix-output.xml",
+      "*.pyc",
+      "__pycache__",
+      ".git",
+      ".venv",
+      "qdrant_storage",
+      "fastembed_cache",
+      "scratch",
+      "unsloth_compiled_cache",
+      "results_sft",
+      "results_dpo"
+    ]
+  }
+}

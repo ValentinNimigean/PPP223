@@ -196,7 +196,7 @@ def rows_from_report(
 def main():
     parser = argparse.ArgumentParser(description="Create failure-driven DPO rows from eval report.")
     parser.add_argument("--report", required=True, help="Path to eval_report*.json")
-    parser.add_argument("--out", default="preference_data_failures.jsonl")
+    parser.add_argument("--out", default="training_data/preferences/preference_data_failures.jsonl")
     parser.add_argument("--threshold", type=float, default=0.75)
     parser.add_argument("--repo-map", default=None, help="Reserved for future richer chosen-answer generation.")
     parser.add_argument("--benchmark", default=None, help="Reserved for future benchmark-aware generation.")
@@ -206,6 +206,7 @@ def main():
     rows, stats = rows_from_report(report, source_report=args.report, threshold=args.threshold)
 
     out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
