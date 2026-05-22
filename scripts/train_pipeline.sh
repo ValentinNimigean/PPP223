@@ -85,7 +85,7 @@ if [[ "$SKIP_EVAL" -eq 0 ]]; then
   echo "========================================"
   echo "STEP 0: Base eval before training"
   echo "========================================"
-  python eval/eval.py \
+  python -m eval.eval \
     --repo "$REPO" \
     --model "$OLLAMA_BASE_MODEL" \
     --benchmark eval/benchmark_self.json \
@@ -121,7 +121,7 @@ if [[ "$SKIP_SFT" -eq 0 ]]; then
   echo "========================================"
   echo "STEP 3: Dry-run SFT formatting"
   echo "========================================"
-  python model/finetune.py \
+  python -m model.finetune \
     --data "$SFT_TRAIN_DATA" \
     --val-data "$SFT_VAL_DATA" \
     --model "$SFT_BASE_MODEL" \
@@ -133,7 +133,7 @@ if [[ "$SKIP_SFT" -eq 0 ]]; then
   echo "========================================"
   echo "STEP 4: SFT fine-tuning"
   echo "========================================"
-  python model/finetune.py \
+  python -m model.finetune \
     --data "$SFT_TRAIN_DATA" \
     --val-data "$SFT_VAL_DATA" \
     --model "$SFT_BASE_MODEL" \
@@ -152,7 +152,7 @@ if [[ "$SKIP_EVAL" -eq 0 ]]; then
   echo "========================================"
   echo "NOTE: This evaluates '$OLLAMA_BASE_MODEL'. It does NOT automatically evaluate results_sft/adapter."
   echo "To evaluate the fine-tuned model, export/serve the adapter first."
-  python eval/eval.py \
+  python -m eval.eval \
     --repo "$REPO" \
     --model "$OLLAMA_BASE_MODEL" \
     --benchmark eval/benchmark_self.json \

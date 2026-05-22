@@ -6,4 +6,4 @@ BENCHMARK="${3:-eval/benchmark_self.json}"
 OUT="${4:-eval_report.json}"
 
 echo "Evaluating model=$MODEL on repo=$REPO using benchmark=$BENCHMARK"
-python eval/eval.py --repo "$REPO" --model "$MODEL" --benchmark "$BENCHMARK" --out "$OUT" --verbose
+python -m eval.eval --repo "$REPO" --model "$MODEL" --benchmark "$BENCHMARK" --out "$OUT" --verbose

@@ -175,7 +175,7 @@ Or you can trigger the evaluation modes manually:
 
 **Run Demo Mode Manual Evaluation:**
 ```bash
-python eval/eval.py \
+python -m eval.eval \
   --repo . \
   --model qwen2.5-coder:3b \
   --benchmark eval/benchmark_self.json \
@@ -185,7 +185,7 @@ python eval/eval.py \
 
 **Run Honest Mode Manual Evaluation:**
 ```bash
-python eval/eval.py \
+python -m eval.eval \
   --repo . \
   --model qwen2.5-coder:3b \
   --benchmark eval/benchmark_self.json \
@@ -206,7 +206,7 @@ bash scripts/eval_external_httpx.sh ../httpx qwen2.5-coder:3b
 
 Alternatively, run the evaluation command manually:
 ```bash
-python eval/eval.py \
+python -m eval.eval \
   --repo ../httpx \
   --model qwen2.5-coder:3b \
   --benchmark eval/benchmark_httpx.json \
@@ -239,7 +239,7 @@ The codebase includes full support for parameter-efficient fine-tuning (PEFT) us
 
 3. **Execute a dry-run token audit to verify training constraints:**
    ```bash
-   python model/finetune.py \
+   python -m model.finetune \
      --data data/final/sft_train.jsonl \
      --val-data data/final/sft_val.jsonl \
      --model unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit \
@@ -251,7 +251,7 @@ The codebase includes full support for parameter-efficient fine-tuning (PEFT) us
 4. **Train the SFT model adapter:**
    ```bash
    PYTORCH_ALLOC_CONF=expandable_segments:True \
-   python model/finetune.py \
+   python -m model.finetune \
      --data data/final/sft_train.jsonl \
      --val-data data/final/sft_val.jsonl \
      --model unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit \
@@ -335,7 +335,7 @@ If fine-tuning crashes with an Out-of-Memory (OOM) error:
 Use this optimized, low-memory fallback configuration:
 ```bash
 PYTORCH_ALLOC_CONF=expandable_segments:True \
-python model/finetune.py \
+python -m model.finetune \
   --data data/final/sft_train.jsonl \
   --val-data data/final/sft_val.jsonl \
   --model unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit \

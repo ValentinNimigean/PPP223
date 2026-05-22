@@ -11,7 +11,7 @@ if [[ ! -d "$HTTPX_REPO" ]]; then
   exit 1
 fi
 
-python eval/eval.py \
+python -m eval.eval \
   --repo "$HTTPX_REPO" \
   --model "$MODEL" \
   --benchmark eval/benchmark_httpx.json \

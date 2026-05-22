@@ -12,7 +12,7 @@ PREFERRED_ADAPTER_CANDIDATES = (
 
 def recommended_training_commands() -> list[str]:
     return [
-        "python model/finetune.py --task chat --data data/final/sft_train.jsonl --val-data data/final/sft_val.jsonl --model unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit --out results_sft",
+        "python -m model.finetune --task chat --data data/final/sft_train.jsonl --val-data data/final/sft_val.jsonl --model unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit --out results_sft",
         "bash scripts/train_rlhf_ppo.sh --train",
     ]
 

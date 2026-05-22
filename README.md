@@ -116,7 +116,7 @@ Self-repo benchmarks are useful for fast iteration, but can suffer from contamin
 
 **1. Run Demo-mode evaluation (Self-repo):**
 ```bash
-python eval/eval.py \
+python -m eval.eval \
   --repo . \
   --model qwen2.5-coder:3b \
   --benchmark eval/benchmark_self.json \
@@ -125,7 +125,7 @@ python eval/eval.py \
 
 **2. Run Honest-mode evaluation (Self-repo):**
 ```bash
-python eval/eval.py \
+python -m eval.eval \
   --repo . \
   --model qwen2.5-coder:3b \
   --benchmark eval/benchmark_self.json \
@@ -152,7 +152,7 @@ To optimize the agent for local inference and specialized Python code understand
 
 Recommended SFT command:
 ```bash
-python model/finetune.py \
+python -m model.finetune \
   --task chat \
   --data data/final/sft_train.jsonl \
   --val-data data/final/sft_val.jsonl \

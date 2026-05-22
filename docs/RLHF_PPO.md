@@ -4,6 +4,8 @@ This project satisfies the “Incorporate RLHF” requirement through a PPO-base
 
 Training-ready inputs must come from `data/final/*.jsonl`. Raw helper datasets such as `synthetic_qa_combined_2048.jsonl` and `preference_data_combined.jsonl` are not valid training inputs.
 
+This PPO implementation is pinned to `trl==0.11.4`. Install the training stack from `requirements-train.txt` or run `pip install trl==0.11.4` explicitly if your environment has a different TRL version.
+
 ## What RLHF Means Here
 
 The RLHF pipeline has four stages:
@@ -99,6 +101,24 @@ python -m alignment.ppo_trainer \
   --target-kl 0.1
 ```
 
+For a smoke test, run PPO first with `--total-episodes 100` and confirm the dry-run and short training behave correctly before starting the full `--total-episodes 1000` run.
+
+If reward-model training has already completed, you can retry PPO directly without retraining the reward model:
+
+```bash
+python -m alignment.ppo_trainer \
+  --prompts data/rlhf_prompts.jsonl \
+  --sft-model results_sft/adapter \
+  --reward-model results_reward \
+  --base-model unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit \
+  --out results_ppo \
+  --total-episodes 100 \
+  --learning-rate 3e-6 \
+  --mini-batch-size 1 \
+  --batch-size 4 \
+  --target-kl 0.1
+```
+
 Rule-based shaping adds bonuses or penalties for:
 
 - grounded answers that cite retrieved files
@@ -142,12 +162,14 @@ bash scripts/train_rlhf_ppo.sh \
   --sft-prompts-source data/final/sft_train.jsonl
 ```
 
+If `results_reward/adapter` already exists and you only want to retry PPO, add `--skip-reward-if-exists` to reuse the existing reward model artifacts.
+
 ## Evaluation
 
 Compare base, SFT, and PPO using:
 
 ```bash
-python eval/eval.py \
+python -m eval.eval \
   --repo . \
   --model results_ppo/adapter \
   --backend hf-peft \

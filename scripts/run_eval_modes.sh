@@ -6,7 +6,7 @@ MODEL="${2:-qwen2.5-coder:3b}"
 BENCHMARK="${3:-eval/benchmark_self.json}"
 
 echo "Running demo-mode eval..."
-python eval/eval.py \
+python -m eval.eval \
   --repo "$REPO" \
   --model "$MODEL" \
   --benchmark "$BENCHMARK" \
@@ -14,7 +14,7 @@ python eval/eval.py \
   --verbose
 
 echo "Running honest-mode eval..."
-python eval/eval.py \
+python -m eval.eval \
   --repo "$REPO" \
   --model "$MODEL" \
   --benchmark "$BENCHMARK" \

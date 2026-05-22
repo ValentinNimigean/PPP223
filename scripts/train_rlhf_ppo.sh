@@ -12,6 +12,7 @@ REWARD_OUT="results_reward"
 PPO_OUT="results_ppo"
 EVAL_OUT="eval_report_ppo.json"
 REPO="."
+SKIP_REWARD_IF_EXISTS=0
 PYTHON_BIN="python"
 
 if [[ -x ".venv/bin/python" ]]; then
@@ -32,6 +33,7 @@ while [[ $# -gt 0 ]]; do
     --ppo-out) PPO_OUT="$2"; shift 2 ;;
     --eval-out) EVAL_OUT="$2"; shift 2 ;;
     --repo) REPO="$2"; shift 2 ;;
+    --skip-reward-if-exists) SKIP_REWARD_IF_EXISTS=1; shift ;;
     *) echo "Unknown argument: $1"; exit 1 ;;
   esac
 done
@@ -48,6 +50,7 @@ echo "SFT model:    $SFT_MODEL"
 echo "Reward out:   $REWARD_OUT"
 echo "PPO out:      $PPO_OUT"
 echo "Eval out:     $EVAL_OUT"
+echo "Skip reward:  $SKIP_REWARD_IF_EXISTS"
 echo "Python:       $PYTHON_BIN"
 echo "========================================"
 
@@ -106,7 +109,7 @@ PPO_CMD=(
 )
 
 EVAL_CMD=(
-  "$PYTHON_BIN" eval/eval.py
+  "$PYTHON_BIN" -m eval.eval
   --repo "$REPO"
   --model "$PPO_OUT/adapter"
   --backend hf-peft
@@ -143,8 +146,12 @@ if [[ "$MODE" == "dry-run" ]]; then
 fi
 
 echo ""
-echo "6. Train reward model"
-"${REWARD_CMD[@]}"
+if [[ "$SKIP_REWARD_IF_EXISTS" -eq 1 && -d "$REWARD_OUT/adapter" ]]; then
+  echo "6. Reusing existing reward adapter at $REWARD_OUT/adapter"
+else
+  echo "6. Train reward model"
+  "${REWARD_CMD[@]}"
+fi
 
 echo ""
 echo "7. Run PPO training"

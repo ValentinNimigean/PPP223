@@ -60,19 +60,59 @@ def resolve_reward_backend(import_module=importlib.import_module) -> dict[str, s
 
 def _tokenize_reward_dataset(dataset, tokenizer, max_length: int):
     def preprocess(examples):
-        return tokenizer(
+        tokenized = tokenizer(
             examples["text"],
             truncation=True,
             max_length=max_length,
             padding="max_length",
         )
+        tokenized["labels"] = [float(label) for label in examples["label"]]
+        return tokenized
 
     tokenized = dataset.map(preprocess, batched=True)
-    tokenized = tokenized.rename_column("label", "labels")
     remove_cols = [col for col in tokenized.column_names if col not in {"input_ids", "attention_mask", "labels"}]
     if remove_cols:
         tokenized = tokenized.remove_columns(remove_cols)
     return tokenized
+
+
+def build_training_arguments(
+    transformers,
+    *,
+    output_dir: str,
+    max_steps: int,
+    batch_size: int,
+    learning_rate: float,
+    eval_dataset,
+):
+    common_kwargs: dict[str, Any] = {
+        "output_dir": output_dir,
+        "max_steps": max_steps,
+        "per_device_train_batch_size": batch_size,
+        "per_device_eval_batch_size": batch_size,
+        "learning_rate": learning_rate,
+        "logging_steps": 10,
+        "save_steps": max(50, max_steps),
+        "report_to": [],
+        "remove_unused_columns": False,
+    }
+    has_eval = eval_dataset is not None
+    eval_kwargs: dict[str, Any] = {}
+    if has_eval:
+        eval_kwargs["evaluation_strategy"] = "steps"
+        eval_kwargs["eval_steps"] = 25
+    else:
+        eval_kwargs["evaluation_strategy"] = "no"
+
+    try:
+        return transformers.TrainingArguments(**common_kwargs, **eval_kwargs)
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        fallback_eval_kwargs = dict(eval_kwargs)
+        if "evaluation_strategy" in fallback_eval_kwargs:
+            fallback_eval_kwargs["eval_strategy"] = fallback_eval_kwargs.pop("evaluation_strategy")
+        return transformers.TrainingArguments(**common_kwargs, **fallback_eval_kwargs)
 
 
 def _refuse_raw_preference_dataset(path: str, allow_raw_dataset: bool) -> None:
@@ -233,18 +273,13 @@ def train_reward_model(
     train_dataset = _tokenize_reward_dataset(split["train"], tokenizer, max_length=max_length)
     eval_dataset = _tokenize_reward_dataset(split["test"], tokenizer, max_length=max_length) if split["test"] is not None else None
 
-    training_args = transformers.TrainingArguments(
+    training_args = build_training_arguments(
+        transformers,
         output_dir=output_dir,
         max_steps=max_steps,
-        per_device_train_batch_size=batch_size,
-        per_device_eval_batch_size=batch_size,
+        batch_size=batch_size,
         learning_rate=learning_rate,
-        logging_steps=10,
-        evaluation_strategy="steps" if eval_dataset is not None else "no",
-        eval_steps=25 if eval_dataset is not None else None,
-        save_steps=max(50, max_steps),
-        report_to=[],
-        remove_unused_columns=False,
+        eval_dataset=eval_dataset,
     )
 
     def compute_metrics(eval_pred):

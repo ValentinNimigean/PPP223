@@ -62,7 +62,7 @@ def test_missing_default_adapter_produces_clear_error(tmp_path):
 
     assert "results_ppo/adapter" in message
     assert "results_sft/adapter" in message
-    assert "python model/finetune.py" in message
+    assert "python -m model.finetune" in message
     assert "bash scripts/train_rlhf_ppo.sh --train" in message
 
 

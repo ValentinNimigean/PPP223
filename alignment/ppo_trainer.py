@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import inspect
 import json
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,11 @@ from alignment.rewards import score_rule_based_reward
 PPO_IMPORT_ERROR = (
     "PPO training dependencies are missing. Install with: "
     "pip install -r requirements-train.txt"
+)
+PPO_TRL_VERSION = "0.11.4"
+PPO_TRL_COMPAT_ERROR = (
+    f"This PPO implementation requires trl=={PPO_TRL_VERSION}. "
+    f"Run: pip install trl=={PPO_TRL_VERSION}"
 )
 
 
@@ -60,6 +66,42 @@ def build_ppo_config_dict(
         "dry_run": dry_run,
         "uses_trl_ppo_trainer": True,
     }
+
+
+def check_ppo_trl_compatibility(trl) -> None:
+    version = getattr(trl, "__version__", None)
+    trainer_signature = inspect.signature(trl.PPOTrainer.__init__)
+    required = {"config", "model", "tokenizer"}
+    supported = set(trainer_signature.parameters)
+    if version != PPO_TRL_VERSION or not required.issubset(supported):
+        raise ValueError(PPO_TRL_COMPAT_ERROR)
+
+
+def build_compatible_ppo_config(
+    trl,
+    *,
+    learning_rate: float,
+    batch_size: int,
+    mini_batch_size: int,
+    target_kl: float,
+):
+    supported = inspect.signature(trl.PPOConfig).parameters
+    kwargs: dict[str, Any] = {}
+
+    if "learning_rate" in supported:
+        kwargs["learning_rate"] = learning_rate
+    if "batch_size" in supported:
+        kwargs["batch_size"] = batch_size
+    if "mini_batch_size" in supported:
+        kwargs["mini_batch_size"] = mini_batch_size
+    if "target_kl" in supported:
+        kwargs["target_kl"] = target_kl
+    if "target" in supported:
+        kwargs["target"] = target_kl
+    if "log_with" in supported:
+        kwargs["log_with"] = None
+
+    return trl.PPOConfig(**kwargs)
 
 
 def _load_prompt_rows(path: str) -> list[dict[str, Any]]:
@@ -127,6 +169,7 @@ def run_ppo_training(
     trl = modules["trl"]
     transformers = modules["transformers"]
     peft = modules["peft"]
+    check_ppo_trl_compatibility(trl)
 
     if not torch.cuda.is_available():
         raise EnvironmentError("CUDA GPU required for PPO RLHF training. Use --dry-run on CPU-only machines.")
@@ -157,12 +200,12 @@ def run_ppo_training(
     policy_model = trl.AutoModelForCausalLMWithValueHead.from_pretrained(policy_base)
     ref_model = trl.create_reference_model(policy_model)
 
-    ppo_config = trl.PPOConfig(
+    ppo_config = build_compatible_ppo_config(
+        trl,
         learning_rate=learning_rate,
         batch_size=batch_size,
         mini_batch_size=mini_batch_size,
         target_kl=target_kl,
-        log_with=None,
     )
 
     ppo_trainer = trl.PPOTrainer(
