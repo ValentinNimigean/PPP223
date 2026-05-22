@@ -14,20 +14,20 @@ from model.agent import SLMAgent
 # Set Page Configuration for maximum width and title
 st.set_page_config(page_title="SLM Code Assistant", page_icon="code", layout="wide")
 
-# Inject Custom Framework CSS for "Glassmorphic" Premium UI
+# Inject custom light-theme styling
 st.markdown("""
 <style>
-    /* Dark Premium Base */
+    /* Light application base */
     .stApp {
-        background-color: #0d1117;
-        color: #c9d1d9;
+        background: linear-gradient(180deg, #f7f3ea 0%, #efe7d8 100%);
+        color: #1f2937;
         font-family: 'Inter', -apple-system, sans-serif;
     }
     
-    /* Subtle Sidebar styling */
+    /* Sidebar styling */
     .stSidebar {
-        background-color: #161b22 !important;
-        border-right: 1px solid #30363d;
+        background: #fbf7ef !important;
+        border-right: 1px solid #d6c7ae;
     }
     
     /* Chat bubbles: Assistant */
@@ -35,36 +35,37 @@ st.markdown("""
         border-radius: 12px;
         padding: 1rem;
         margin-bottom: 1rem;
-        background-color: #21262d;
-        border: 1px solid rgba(240, 246, 252, 0.1);
+        background-color: rgba(255, 252, 246, 0.92);
+        border: 1px solid #dbcab0;
         backdrop-filter: blur(10px);
         transition: transform 0.2s;
+        box-shadow: 0 10px 30px rgba(120, 94, 47, 0.08);
     }
     
     /* Chat bubbles: User */
     .stChatMessage[data-testid="stChatMessage-user"] {
-        background-color: rgba(31, 111, 235, 0.1);
-        border: 1px solid rgba(31, 111, 235, 0.3);
+        background-color: #e4eefc;
+        border: 1px solid #a8c2eb;
     }
 
     h1, h2, h3 {
-        color: #58a6ff;
+        color: #1f4f8f;
         font-weight: 600;
     }
 
     /* Custom Feedback Button styles */
     .stButton>button {
-        background-color: #21262d !important;
-        color: #c9d1d9 !important;
-        border: 1px solid #30363d !important;
+        background-color: #fffaf2 !important;
+        color: #1f2937 !important;
+        border: 1px solid #cdb792 !important;
         border-radius: 8px !important;
         transition: all 0.2s ease-in-out !important;
     }
     
     .stButton>button:hover {
-        background-color: #30363d !important;
-        border-color: #8b949e !important;
-        color: #58a6ff !important;
+        background-color: #f1e4cf !important;
+        border-color: #b7925f !important;
+        color: #1f4f8f !important;
         transform: scale(1.02);
     }
 </style>
@@ -131,7 +132,7 @@ def load_backend(repo_path, model_name):
     retriever.ingest_chunks(chunks)
     
     # Init Agent
-    agent = SLMAgent(repo_map_string=repo_map_string, model=model_name, hallucination_check=True)
+    agent = SLMAgent(repo_map_string=repo_map_string, model=model_name, hallucination_check=False)
     agent.set_retriever(retriever)
     agent.set_chunks(chunks)
     
@@ -173,7 +174,7 @@ for idx, message in enumerate(st.session_state.messages):
             
             if prompt_text:  # Ensure we have the prompt to pair with
                 if not feedback:
-                    st.markdown("<div style='border-top: 1px solid rgba(240, 246, 252, 0.1); margin: 0.5rem 0;'></div>", unsafe_allow_html=True)
+                    st.markdown("<div style='border-top: 1px solid #dbcab0; margin: 0.5rem 0;'></div>", unsafe_allow_html=True)
                     col1, col2, _ = st.columns([0.15, 0.22, 0.63])
                     with col1:
                         if st.button("👍 Like", key=f"like_{idx}", help="Like this response"):
@@ -186,11 +187,11 @@ for idx, message in enumerate(st.session_state.messages):
                             message["feedback"] = "dislike_pending"
                             st.rerun()
                 elif feedback == "like":
-                    st.markdown("<div style='border-top: 1px solid rgba(240, 246, 252, 0.1); margin: 0.5rem 0;'></div>", unsafe_allow_html=True)
-                    st.markdown("<small style='color: #58a6ff;'>👍 Liked (Added to preference dataset)</small>", unsafe_allow_html=True)
+                    st.markdown("<div style='border-top: 1px solid #dbcab0; margin: 0.5rem 0;'></div>", unsafe_allow_html=True)
+                    st.markdown("<small style='color: #1f4f8f;'>👍 Liked (Added to preference dataset)</small>", unsafe_allow_html=True)
                 elif feedback == "dislike_pending":
-                    st.markdown("<div style='border-top: 1px solid rgba(240, 246, 252, 0.1); margin: 0.5rem 0;'></div>", unsafe_allow_html=True)
-                    st.markdown("<small style='color: #ff7b72;'>👎 Correction required:</small>", unsafe_allow_html=True)
+                    st.markdown("<div style='border-top: 1px solid #dbcab0; margin: 0.5rem 0;'></div>", unsafe_allow_html=True)
+                    st.markdown("<small style='color: #b04a37;'>👎 Correction required:</small>", unsafe_allow_html=True)
                     with st.form(key=f"form_{idx}"):
                         correction = st.text_area("Correct/Preferred Response:", value="", key=f"corr_text_{idx}", help="How should the agent have answered?")
                         submit = st.form_submit_button("Save Feedback")
@@ -204,8 +205,8 @@ for idx, message in enumerate(st.session_state.messages):
                             else:
                                 st.warning("Please enter a correction.")
                 elif feedback == "dislike":
-                    st.markdown("<div style='border-top: 1px solid rgba(240, 246, 252, 0.1); margin: 0.5rem 0;'></div>", unsafe_allow_html=True)
-                    st.markdown("<small style='color: #ff7b72;'>👎 Disliked (Correction added to preference dataset)</small>", unsafe_allow_html=True)
+                    st.markdown("<div style='border-top: 1px solid #dbcab0; margin: 0.5rem 0;'></div>", unsafe_allow_html=True)
+                    st.markdown("<small style='color: #b04a37;'>👎 Disliked (Correction added to preference dataset)</small>", unsafe_allow_html=True)
                     if message.get("correction"):
                         st.info(f"**Your correction:** {message['correction']}")
 

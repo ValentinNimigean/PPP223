@@ -2,7 +2,7 @@
 2026.5.1
 2026.5.2
 4.57.6
-0.24.0
+0.11.4
 __UNSLOTH_VERSIONING__
 """
 
@@ -28,7 +28,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 from unsloth_zoo.temporary_patches.common import torch_compile
 from typing import Any, List, Optional, Tuple, Union, Dict, Set, Callable
-from trl.trainer.bco_trainer import (Any, AutoModelForCausalLM, BCOConfig, BCOTrainer, BaseImageProcessor, BaseTrainer, CLF_NAME, Callable, DPODataCollatorWithPadding, DataCollator, DataLoader, Dataset, EvalLoopOutput, F, FeatureExtractionMixin, Literal, LogisticRegression, Optional, PartialState, Path, PeftModel, PreTrainedModel, PreTrainedTokenizerBase, ProcessorMixin, RUNNING_NAME, RunningMoments, SequentialSampler, TrainerCallback, TrainingArguments, Union, _process_tokens, _tokenize, autocast, contextmanager, create_reference_model, defaultdict, disable_dropout_in_model, has_length, inspect, is_comet_available, is_joblib_available, is_peft_available, is_sklearn_available, is_wandb_available, itemgetter, joblib, log_table_to_comet_experiment, logger, logging, maybe_apply_chat_template, maybe_extract_prompt, maybe_unpair_preference_dataset, nn, np, nullcontext, os, pad_to_length, pd, peft_module_casting_to_bf16, prepare_deepspeed, prepare_model_for_kbit_training, random, selective_log_softmax, textwrap, torch, tqdm, warnings, AutoModelForCausalLM, BCOConfig, BCOTrainer, BaseImageProcessor, Callable, DPODataCollatorWithPadding, DataCollator, Dataset, EvalLoopOutput, F, FeatureExtractionMixin, LogisticRegression, Optional, PartialState, PeftModel, PreTrainedModel, PreTrainedTokenizerBase, ProcessorMixin, RunningMoments, TrainerCallback, TrainingArguments, Union, autocast, create_reference_model, defaultdict, disable_dropout_in_model, inspect, is_comet_available, is_joblib_available, is_peft_available, is_sklearn_available, is_wandb_available, joblib, logger, maybe_apply_chat_template, maybe_extract_prompt, maybe_unpair_preference_dataset, nn, np, os, peft_module_casting_to_bf16, prepare_deepspeed, prepare_model_for_kbit_training, torch, warnings, F, Optional, PeftModel, PreTrainedModel, is_peft_available, logger, os, torch)
+from trl.trainer.bco_trainer import (Any, AutoModelForCausalLM, BCOConfig, BCOTrainer, CLF_NAME, Callable, DPODataCollatorWithPadding, DataCollator, DataLoader, Dataset, Dict, EvalLoopOutput, F, List, Literal, LogisticRegression, Optional, PartialState, PeftModel, PreTrainedModel, PreTrainedModelWrapper, PreTrainedTokenizerBase, RUNNING_NAME, RunningMoments, SequentialSampler, Trainer, TrainerCallback, TrainingArguments, Tuple, Union, _process_tokens, _tokenize, amp, contextmanager, create_reference_model, deepcopy, defaultdict, disable_dropout_in_model, has_length, inspect, is_peft_available, is_sklearn_available, is_wandb_available, itemgetter, nn, np, nullcontext, os, pad_to_length, peft_module_casting_to_bf16, prepare_model_for_kbit_training, random, torch, tqdm, trl_sanitze_kwargs_for_tagging, warnings, wraps, AutoModelForCausalLM, BCOConfig, BCOTrainer, Callable, DPODataCollatorWithPadding, DataCollator, Dataset, Dict, EvalLoopOutput, F, List, LogisticRegression, Optional, PartialState, PeftModel, PreTrainedModel, PreTrainedTokenizerBase, RunningMoments, Trainer, TrainerCallback, TrainingArguments, Tuple, Union, amp, create_reference_model, defaultdict, disable_dropout_in_model, inspect, is_peft_available, is_sklearn_available, is_wandb_available, nn, np, os, peft_module_casting_to_bf16, prepare_model_for_kbit_training, torch, warnings, F, Optional, PeftModel, PreTrainedModel, Trainer, is_peft_available, os, torch)
 
 
 import os
@@ -341,21 +341,17 @@ class UnslothBCOConfig(BCOConfig):
     
     Configuration class for the [`BCOTrainer`].
 
-    This class includes only the parameters that are specific to BCO training. For a full list of training arguments,
-    please refer to the [`~transformers.TrainingArguments`] documentation. Note that default values in this class may
-    differ from those in [`~transformers.TrainingArguments`].
-
     Using [`~transformers.HfArgumentParser`] we can turn this class into
     [argparse](https://docs.python.org/3/library/argparse#module-argparse) arguments that can be specified on the
     command line.
 
     Parameters:
-        max_length (`int` or `None`, *optional*, defaults to `1024`):
+        max_length (`Optional[int]`, *optional*, defaults to `None`):
             Maximum length of the sequences (prompt + completion) in the batch. This argument is required if you want
             to use the default data collator.
-        max_prompt_length (`int` or `None`, *optional*, defaults to `512`):
+        max_prompt_length (`Optional[int]`, *optional*, defaults to `None`):
             Maximum length of the prompt. This argument is required if you want to use the default data collator.
-        max_completion_length (`int`, *optional*):
+        max_completion_length (`Optional[int]`, *optional*, defaults to `None`):
             Maximum length of the completion. This argument is required if you want to use the default data collator
             and your model is an encoder-decoder.
         beta (`float`, *optional*, defaults to `0.1`):
@@ -363,29 +359,27 @@ class UnslothBCOConfig(BCOConfig):
             reference model.
         label_pad_token_id (`int`,  *optional*, defaults to `-100`):
             Label pad token id. This argument is required if you want to use the default data collator.
-        padding_value (`int`, *optional*):
+        padding_value (`Optional[int]`, *optional*, defaults to `None`):
             Padding value to use. If `None`, the padding value of the tokenizer is used.
         truncation_mode (`str`, *optional*, defaults to `"keep_end"`):
             Truncation mode to use when the prompt is too long. Possible values are `"keep_end"` or `"keep_start"`.
             This argument is required if you want to use the default data collator.
-        disable_dropout (`bool`, *optional*, defaults to `True`):
-            Whether to disable dropout in the model and reference model.
         generate_during_eval (`bool`, *optional*, defaults to `False`):
-            If `True`, generates and logs completions from both the model and the reference model to W&B or Comet
-            during evaluation.
-        is_encoder_decoder (`bool`, *optional*):
+            If `True`, generates and logs completions from both the model and the reference model to W&B during
+            evaluation.
+        is_encoder_decoder (`Optional[bool]`, *optional*, defaults to `None`):
             When using the `model_init` argument (callable) to instantiate the model instead of the `model` argument,
             you need to specify if the model returned by the callable is an encoder-decoder model.
         precompute_ref_log_probs (`bool`, *optional*, defaults to `False`):
             Whether to precompute reference model log probabilities for training and evaluation datasets. This is
             useful when training without the reference model to reduce the total GPU memory needed.
-        model_init_kwargs (`dict[str, Any]`, *optional*):
+        model_init_kwargs (`Optional[Dict[str, Any]]`, *optional*, defaults to `None`):
             Keyword arguments to pass to `AutoModelForCausalLM.from_pretrained` when instantiating the model from a
             string.
-        ref_model_init_kwargs (`dict[str, Any]`, *optional*):
+        ref_model_init_kwargs (`Optional[Dict[str, Any]]`, *optional*, defaults to `None`):
             Keyword arguments to pass to `AutoModelForCausalLM.from_pretrained` when instantiating the reference model
             from a string.
-        dataset_num_proc (`int`, *optional*):
+        dataset_num_proc (`Optional[int]`, *optional*, defaults to `None`):
             Number of processes to use for processing the dataset.
         prompt_sample_size (`int`, *optional*, defaults to `1024`):
             Number of prompts that are fed to density ratio classifier.
@@ -521,7 +515,7 @@ class UnslothBCOConfig(BCOConfig):
         hub_private_repo = None,
         hub_always_push = False,
         hub_revision = None,
-        gradient_checkpointing = True,
+        gradient_checkpointing = False,
         gradient_checkpointing_kwargs = None,
         include_inputs_for_metrics = False,
         eval_do_concat_batches = True,
@@ -548,14 +542,13 @@ class UnslothBCOConfig(BCOConfig):
         liger_kernel_config = None,
         eval_use_gather_object = False,
         average_tokens_across_devices = True,
-        max_length = 1024,
-        max_prompt_length = 512,
+        max_length = None,
+        max_prompt_length = None,
         max_completion_length = None,
         beta = 0.1,
         label_pad_token_id = -100,
         padding_value = None,
         truncation_mode = 'keep_end',
-        disable_dropout = True,
         generate_during_eval = False,
         is_encoder_decoder = None,
         precompute_ref_log_probs = False,
@@ -729,7 +722,6 @@ class UnslothBCOConfig(BCOConfig):
             label_pad_token_id = label_pad_token_id,
             padding_value = padding_value,
             truncation_mode = truncation_mode,
-            disable_dropout = disable_dropout,
             generate_during_eval = generate_during_eval,
             is_encoder_decoder = is_encoder_decoder,
             precompute_ref_log_probs = precompute_ref_log_probs,
@@ -754,23 +746,10 @@ class UnslothBCOConfig(BCOConfig):
 
 pass
 
-class _UnslothBCOTrainer(BaseTrainer):
+class _UnslothBCOTrainer(Trainer):
     r""""""
 
     _tag_names = ["trl", "bco"]
-    _name = "BCO"
-    _paper = {
-        "title": "Binary Classifier Optimization for Large Language Model Alignment",
-        "id": "2404.04656",
-        # docstyle-ignore
-        "citation": textwrap.dedent("""\
-            @article{jung2024binary,
-                title        = {{Binary Classifier Optimization for Large Language Model Alignment}},
-                author       = {Seungjae Jung and Gunsoo Han and Daniel Wontae Nam and Kyoung{-}Woon On},
-                year         = 2024,
-                eprint       = {arXiv:2404.04656}
-            }"""),
-    }
 
     def __init__(
         self,
@@ -778,38 +757,29 @@ class _UnslothBCOTrainer(BaseTrainer):
         ref_model: Optional[Union[PreTrainedModel, nn.Module, str]] = None,
         args: BCOConfig = None,
         train_dataset: Optional[Dataset] = None,
-        eval_dataset: Optional[Union[Dataset, dict[str, Dataset]]] = None,
-        processing_class: Optional[
-            Union[PreTrainedTokenizerBase, BaseImageProcessor, FeatureExtractionMixin, ProcessorMixin]
-        ] = None,
+        eval_dataset: Optional[Union[Dataset, Dict[str, Dataset]]] = None,
+        tokenizer: Optional[PreTrainedTokenizerBase] = None,
         data_collator: Optional[DataCollator] = None,
         model_init: Optional[Callable[[], PreTrainedModel]] = None,
-        callbacks: Optional[list[TrainerCallback]] = None,
-        optimizers: tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = (None, None),
+        callbacks: Optional[List[TrainerCallback]] = None,
+        optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = (None, None),
         preprocess_logits_for_metrics: Optional[Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
-        peft_config: Optional[dict] = None,
-        compute_metrics: Optional[Callable[[EvalLoopOutput], dict]] = None,
+        peft_config: Optional[Dict] = None,
+        compute_metrics: Optional[Callable[[EvalLoopOutput], Dict]] = None,
         model_adapter_name: Optional[str] = None,
         ref_adapter_name: Optional[str] = None,
         embedding_func: Optional[Callable] = None,
         embedding_tokenizer: Optional[PreTrainedTokenizerBase] = None,
     ):
-        if not os.environ.get("TRL_EXPERIMENTAL_SILENCE"):
-            warnings.warn(
-                "This trainer will soon be moved to trl.experimental and is a candidate for removal. If you rely on "
-                "it and want it to remain, please share your comments here: "
-                "https://github.com/huggingface/trl/issues/4223. Silence this warning by setting environment variable "
-                "TRL_EXPERIMENTAL_SILENCE=1."
-            )
-        if embedding_func is not None and not (is_sklearn_available() and is_joblib_available()):
+        if not is_sklearn_available():
             raise ImportError(
-                "BCOTrainer with UDM requires the scikit-learn and joblib libraries. Please install it with `pip install scikit-learn joblib`."
+                "BCOTrainer requires the scikit-learn library. Please install it with `pip install scikit-learn`."
             )
 
         if type(args) is TrainingArguments:
             raise ValueError("Please use `BCOConfig` instead `TrainingArguments`.")
 
-        if not isinstance(model, str) and model is not None and ref_model is model:
+        if not isinstance(model, str) and ref_model is model:
             raise ValueError(
                 "`model` and `ref_model` cannot be the same object. If you want `ref_model` to be the "
                 "same as `model`, you must mass a copy of it, or `None` if you use peft."
@@ -821,16 +791,16 @@ class _UnslothBCOTrainer(BaseTrainer):
             raise ValueError("You passed model_kwargs to the BCOTrainer. But your model is already instantiated.")
         else:
             model_init_kwargs = args.model_init_kwargs
-            dtype = model_init_kwargs.get("dtype")
-            if dtype is not None:
+            torch_dtype = model_init_kwargs.get("torch_dtype")
+            if torch_dtype is not None:
                 # Convert to `torch.dtype` if an str is passed
-                if isinstance(dtype, str) and dtype != "auto":
-                    dtype = getattr(torch, dtype)
-                if dtype != "auto" and not isinstance(dtype, torch.dtype):
+                if isinstance(torch_dtype, str) and torch_dtype != "auto":
+                    torch_dtype = getattr(torch, torch_dtype)
+                if torch_dtype != "auto" and not isinstance(torch_dtype, torch.dtype):
                     raise ValueError(
-                        f"Invalid `dtype` passed to the BCOConfig. Expected a string with either `torch.dtype` or 'auto', but got {dtype}."
+                        f"Invalid `torch_dtype` passed to the BCOConfig. Expected a string with either `torch.dtype` or 'auto', but got {torch_dtype}."
                     )
-                model_init_kwargs["dtype"] = dtype
+                model_init_kwargs["torch_dtype"] = torch_dtype
 
         if args.ref_model_init_kwargs is None:
             ref_model_init_kwargs = {}
@@ -840,21 +810,29 @@ class _UnslothBCOTrainer(BaseTrainer):
             )
         else:
             ref_model_init_kwargs = args.ref_model_init_kwargs
-            dtype = ref_model_init_kwargs.get("dtype")
-            if dtype is not None:
+            torch_dtype = ref_model_init_kwargs.get("torch_dtype")
+            if torch_dtype is not None:
                 # Convert to `torch.dtype` if an str is passed
-                if isinstance(dtype, str) and dtype != "auto":
-                    dtype = getattr(torch, dtype)
-                if dtype != "auto" and not isinstance(dtype, torch.dtype):
+                if isinstance(torch_dtype, str) and torch_dtype != "auto":
+                    torch_dtype = getattr(torch, torch_dtype)
+                if torch_dtype != "auto" and not isinstance(torch_dtype, torch.dtype):
                     raise ValueError(
-                        f"Invalid `dtype` passed to the BCOConfig. Expected a string with either `torch.dtype` or 'auto', but got {dtype}."
+                        f"Invalid `torch_dtype` passed to the BCOConfig. Expected a string with either `torch.dtype` or 'auto', but got {torch_dtype}."
                     )
-                ref_model_init_kwargs["dtype"] = dtype
+                ref_model_init_kwargs["torch_dtype"] = torch_dtype
 
         if isinstance(model, str):
+            warnings.warn(
+                "You passed a model_id to the BCOTrainer. This will automatically create an "
+                "`AutoModelForCausalLM` or a `PeftModel` (if you passed a `peft_config`) for you."
+            )
             model = AutoModelForCausalLM.from_pretrained(model, **model_init_kwargs)
 
         if isinstance(ref_model, str):
+            warnings.warn(
+                "You passed a ref model_id to the BCOTrainer. This will automatically create an "
+                "`AutoModelForCausalLM`"
+            )
             ref_model = AutoModelForCausalLM.from_pretrained(ref_model, **ref_model_init_kwargs)
 
         # Initialize this variable to False. This helps tracking the case when `peft_module_casting_to_bf16`
@@ -883,7 +861,7 @@ class _UnslothBCOTrainer(BaseTrainer):
                     prepare_model_kwargs["gradient_checkpointing_kwargs"] = args.gradient_checkpointing_kwargs
 
                 model = prepare_model_for_kbit_training(model, **prepare_model_kwargs)
-            elif args.gradient_checkpointing:
+            elif getattr(args, "gradient_checkpointing", False):
                 # For backward compatibility with older versions of transformers
                 if hasattr(model, "enable_input_require_grads"):
                     model.enable_input_require_grads()
@@ -904,7 +882,7 @@ class _UnslothBCOTrainer(BaseTrainer):
         # For models that use gradient_checkpointing, we need to attach a hook that enables input
         # to explicitly have `requires_grad=True`, otherwise training will either silently
         # fail or completely fail.
-        elif args.gradient_checkpointing:
+        elif getattr(args, "gradient_checkpointing", False):
             # For backward compatibility with older versions of transformers
             if hasattr(model, "enable_input_require_grads"):
                 model.enable_input_require_grads()
@@ -915,10 +893,10 @@ class _UnslothBCOTrainer(BaseTrainer):
 
                 model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
 
-        if args.generate_during_eval and not (is_wandb_available() or is_comet_available()):
+        if args.generate_during_eval and not is_wandb_available():
             raise ValueError(
-                "`generate_during_eval=True` requires Weights and Biases or Comet to be installed."
-                " Please install `wandb` or `comet-ml` to resolve."
+                "`generate_during_eval=True` requires Weights and Biases to be installed."
+                " Please install with `pip install wandb` to resolve."
             )
 
         if model is not None:
@@ -940,23 +918,25 @@ class _UnslothBCOTrainer(BaseTrainer):
         else:
             self.ref_model = create_reference_model(model)
 
-        if processing_class is None:
+        if tokenizer is None:
             raise ValueError(
-                "max_length or a processing_class must be specified when using the default DPODataCollatorWithPadding"
+                "max_length or a tokenizer must be specified when using the default DPODataCollatorWithPadding"
             )
         if args.max_length is None:
-            logger.warning(
+            warnings.warn(
                 "When using DPODataCollatorWithPadding, you should set `max_length` in the `BCOConfig`. "
                 "It will be set to `512` by default, but you should do it yourself in the future.",
+                UserWarning,
             )
             max_length = 512
         if args.max_length is not None:
             max_length = args.max_length
 
         if args.max_prompt_length is None:
-            logger.warning(
+            warnings.warn(
                 "When using DPODataCollatorWithPadding, you should set `max_prompt_length` in the `BCOConfig`. "
                 "It will be set to `128` by default, but you should do it yourself in the future.",
+                UserWarning,
             )
             max_prompt_length = 128
         if args.max_prompt_length is not None:
@@ -964,9 +944,10 @@ class _UnslothBCOTrainer(BaseTrainer):
 
         max_completion_length = None
         if args.max_completion_length is None and self.is_encoder_decoder:
-            logger.warning(
+            warnings.warn(
                 "When using DPODataCollatorWithPadding with an encoder decoder architecture, you should set `max_completion_length` in the BCOTrainer's init"
                 " it will be set to `128` by default, but you should do it yourself in the future.",
+                UserWarning,
             )
             max_completion_length = 128
         if args.max_completion_length is not None and self.is_encoder_decoder:
@@ -974,7 +955,7 @@ class _UnslothBCOTrainer(BaseTrainer):
 
         if data_collator is None:
             data_collator = DPODataCollatorWithPadding(
-                pad_token_id=processing_class.pad_token_id,
+                pad_token_id=tokenizer.pad_token_id,
                 label_pad_token_id=args.label_pad_token_id,
                 is_encoder_decoder=self.is_encoder_decoder,
             )
@@ -982,28 +963,29 @@ class _UnslothBCOTrainer(BaseTrainer):
             if args.remove_unused_columns:
                 args.remove_unused_columns = False
                 # warn users
-                logger.warning(
+                warnings.warn(
                     "When using DPODataCollatorWithPadding, you should set `remove_unused_columns=False` in your BCOConfig"
                     " we have set it for you, but you should do it yourself in the future.",
+                    UserWarning,
                 )
 
             self.use_dpo_data_collator = True
         else:
             self.use_dpo_data_collator = False
 
-        # Disable dropout in the model and reference model
-        if args.disable_dropout:
-            disable_dropout_in_model(model)
-            if self.ref_model is not None:
-                disable_dropout_in_model(self.ref_model)
+        # disable dropout in the model and reference model
+        disable_dropout_in_model(model)
+        if self.ref_model is not None:
+            disable_dropout_in_model(self.ref_model)
 
         self.max_length = max_length
         self.generate_during_eval = args.generate_during_eval
         self.label_pad_token_id = args.label_pad_token_id
-        self.padding_value = args.padding_value if args.padding_value is not None else processing_class.pad_token_id
+        self.padding_value = args.padding_value if args.padding_value is not None else tokenizer.pad_token_id
         self.max_prompt_length = max_prompt_length
         self.truncation_mode = args.truncation_mode
         self.max_completion_length = max_completion_length
+        self.tokenizer = tokenizer
         self.precompute_ref_log_probs = args.precompute_ref_log_probs
 
         # Since ref_logs are precomputed on the first call to get_train/eval_dataloader
@@ -1017,61 +999,21 @@ class _UnslothBCOTrainer(BaseTrainer):
         # BCO parameter
         self.beta = args.beta
         self.aux_loss_enabled = getattr(model.config, "output_router_logits", False)
-        self.aux_loss_coef = getattr(model.config, "router_aux_loss_coef", 0.0)
-        if self.aux_loss_enabled and self.aux_loss_coef == 0.0:
-            logger.warning(
-                "You set `output_router_logits` to `True` in the model config, but `router_aux_loss_coef` is set to "
-                "`0.0`, meaning the auxiliary loss will not be used. Either set `router_aux_loss_coef` to a value "
-                "greater than `0.0`, or set `output_router_logits` to `False` if you don't want to use the auxiliary "
-                "loss.",
-            )
 
         # Underlying Distribution Matching argument
         self.embedding_func = embedding_func
         self.embedding_tokenizer = embedding_tokenizer
 
-        # The trainer estimates the number of FLOPs [floating-point operations] using the number of elements in the
-        # input tensor associated with the key "input_ids". However, in BCO, the sampled data does not include the
-        # "input_ids" key. Instead, the available keys are "prompt_input_ids" and "completion_input_ids". As a result,
-        # the trainer issues the warning: "Could not estimate the number of tokens of the input, floating-point
-        # operations will not be computed." To suppress this warning, we set the "estimate_tokens" key in the model's
-        # "warnings_issued" dictionary to True. This acts as a flag to indicate that the warning has already been
-        # issued.
-        model.warnings_issued["estimate_tokens"] = True
-
-        with PartialState().main_process_first():
-            # Extract the prompt if needed
-            train_dataset = train_dataset.map(
-                maybe_extract_prompt, num_proc=args.dataset_num_proc, desc="Extracting prompt from train dataset"
-            )
-            # Unpair the dataset if needed
-            train_dataset = maybe_unpair_preference_dataset(
-                train_dataset, args.dataset_num_proc, desc="Unpairing train dataset"
-            )
-            # Apply the chat template if needed
-            train_dataset = train_dataset.map(
-                maybe_apply_chat_template, fn_kwargs={"tokenizer": processing_class}, num_proc=args.dataset_num_proc
-            )
+        with PartialState().local_main_process_first():
+            # Shuffle the datasets
+            train_dataset = train_dataset.shuffle(seed=args.data_seed)
             if eval_dataset is not None:
-                # Extract the prompt if needed
-                eval_dataset = eval_dataset.map(
-                    maybe_extract_prompt, num_proc=args.dataset_num_proc, desc="Extracting prompt from eval dataset"
-                )
-                # Unpair the dataset if needed
-                eval_dataset = maybe_unpair_preference_dataset(
-                    eval_dataset, args.dataset_num_proc, desc="Unpairing eval dataset"
-                )
-                eval_dataset = eval_dataset.map(
-                    maybe_apply_chat_template,
-                    fn_kwargs={"tokenizer": processing_class},
-                    num_proc=args.dataset_num_proc,
-                )
-
+                eval_dataset = eval_dataset.shuffle(seed=args.data_seed)
             # Tokenize and prepare the training datasets
             train_dataset = train_dataset.map(
                 _tokenize,
                 batched=True,
-                fn_kwargs={"tokenizer": processing_class, "embedding_tokenizer": self.embedding_tokenizer},
+                fn_kwargs={"tokenizer": self.tokenizer, "embedding_tokenizer": self.embedding_tokenizer},
                 num_proc=args.dataset_num_proc,
                 desc="Tokenizing train dataset",
             )
@@ -1080,7 +1022,7 @@ class _UnslothBCOTrainer(BaseTrainer):
             fn_kwargs = {
                 "prefix": "",
                 "is_encoder_decoder": self.is_encoder_decoder,
-                "tokenizer": processing_class,
+                "tokenizer": self.tokenizer,
                 "max_length": self.max_length,
                 "truncation_mode": self.truncation_mode,
                 "label_pad_token_id": self.label_pad_token_id,
@@ -1098,7 +1040,7 @@ class _UnslothBCOTrainer(BaseTrainer):
                 # Tokenize
                 eval_dataset = eval_dataset.map(
                     _tokenize,
-                    fn_kwargs={"tokenizer": processing_class, "embedding_tokenizer": self.embedding_tokenizer},
+                    fn_kwargs={"tokenizer": self.tokenizer, "embedding_tokenizer": self.embedding_tokenizer},
                     batched=True,
                     num_proc=args.dataset_num_proc,
                     desc="Tokenizing eval dataset",
@@ -1108,7 +1050,7 @@ class _UnslothBCOTrainer(BaseTrainer):
                 fn_kwargs = {
                     "prefix": "",
                     "is_encoder_decoder": self.is_encoder_decoder,
-                    "tokenizer": processing_class,
+                    "tokenizer": self.tokenizer,
                     "max_length": self.max_length,
                     "truncation_mode": self.truncation_mode,
                     "label_pad_token_id": self.label_pad_token_id,
@@ -1129,24 +1071,22 @@ class _UnslothBCOTrainer(BaseTrainer):
                 lambda x: not x["label"], num_proc=args.dataset_num_proc, desc="Filtering undesirable examples"
             )
 
+            desirable = desirable.shuffle(seed=args.data_seed)
+            undesirable = undesirable.shuffle(seed=args.data_seed)
+
         super().__init__(
             model=model,
             args=args,
             data_collator=data_collator,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
-            processing_class=processing_class,
+            tokenizer=tokenizer,
             model_init=model_init,
             compute_metrics=compute_metrics,
             callbacks=callbacks,
             optimizers=optimizers,
             preprocess_logits_for_metrics=preprocess_logits_for_metrics,
         )
-
-        # Gradient accumulation requires scaled loss. Normally, loss scaling in the parent class depends on whether the
-        # model accepts loss-related kwargs. Since we compute our own loss, this check is irrelevant. We set
-        # self.model_accepts_loss_kwargs to False to enable scaling.
-        self.model_accepts_loss_kwargs = False
 
         # Add tags for models that have been loaded with the correct transformers version
         if hasattr(self.model, "add_model_tags"):
@@ -1171,13 +1111,14 @@ class _UnslothBCOTrainer(BaseTrainer):
                 )
         else:
             if self.is_deepspeed_enabled:
-                self.ref_model = prepare_deepspeed(self.ref_model, self.accelerator)
+                self.ref_model = self._prepare_deepspeed(self.ref_model)
             else:
                 self.ref_model = self.accelerator.prepare_model(self.ref_model, evaluation_mode=True)
 
         self.running = RunningMoments(accelerator=self.accelerator)
 
-        if self.embedding_func is None or args.resume_from_checkpoint:
+        if self.embedding_func is None:
+            warnings.warn("You did not pass `embedding_func` underlying distribution matching feature is deactivated.")
             return
 
         chosen_embeddings = self._get_sample_prompt_embeddings(desirable, sample_size=self.args.prompt_sample_size)
@@ -1191,13 +1132,6 @@ class _UnslothBCOTrainer(BaseTrainer):
         self.clf = LogisticRegression(class_weight="balanced").fit(
             embeddings.cpu().float().numpy(), labels.cpu().numpy()
         )
-        chosen_mean = self.clf.score(
-            chosen_embeddings.cpu().float().numpy(), torch.ones_like(chosen_embeddings[:, 0]).cpu().numpy()
-        )
-        rejected_mean = self.clf.score(
-            rejected_embeddings.cpu().float().numpy(), torch.zeros_like(rejected_embeddings[:, 0]).cpu().numpy()
-        )
-        logger.info(f"UDM classifier training scores: chosen: {chosen_mean}, rejected: {rejected_mean}")
 
     @property
     def match_underlying_distribution(self):
@@ -1205,8 +1139,8 @@ class _UnslothBCOTrainer(BaseTrainer):
 
     def _get_chosen_prob(self, prompt_embeddings: torch.FloatTensor) -> torch.FloatTensor:
         """
-        Calculates the probability if the given prompt embedding is from desirable dataset. This function calculates
-        the probability in the process and ensemble across processes.
+        Calculates the probability if the given prompt embedding is from desirable dataset.
+        This function calculates the probability in the process and ensemble across processes.
         """
         dtype = prompt_embeddings.dtype
         device = prompt_embeddings.device
@@ -1234,10 +1168,11 @@ class _UnslothBCOTrainer(BaseTrainer):
 
     def _vectorize_prompt(self, input_ids: torch.LongTensor, attention_mask: torch.LongTensor) -> torch.FloatTensor:
         """
-        Replaces processing_class.pad_token_id to embedding_tokenizer.pad_token_id and applies self.embedding_func
+        Replaces tokenizer.pad_token_id to embedding_tokenizer.pad_token_id
+        and applies self.embedding_func
         """
         input_ids = torch.where(
-            input_ids == self.processing_class.pad_token_id,
+            input_ids == self.tokenizer.pad_token_id,
             self.embedding_tokenizer.pad_token_id,
             input_ids,
         )
@@ -1251,8 +1186,8 @@ class _UnslothBCOTrainer(BaseTrainer):
         return embeddings
 
     def _get_prompt_embeddings(
-        self, batch: dict[str, Union[list, torch.LongTensor]]
-    ) -> tuple[torch.FloatTensor, torch.FloatTensor]:
+        self, batch: Dict[str, Union[List, torch.LongTensor]]
+    ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
         """Extract embeddings from frozen embedding model"""
 
         if not self.match_underlying_distribution:
@@ -1263,9 +1198,8 @@ class _UnslothBCOTrainer(BaseTrainer):
             attention_mask=batch["embedding_attention_mask"],
         )
 
-        labels = torch.tensor(batch["label"], dtype=torch.bool, device=embeddings.device)
-        chosen_idx = torch.where(labels)[0]
-        rejected_idx = torch.where(~labels)[0]
+        chosen_idx = [i for i in range(len(batch["label"])) if batch["label"][i] is True]
+        rejected_idx = [i for i in range(len(batch["label"])) if batch["label"][i] is False]
 
         chosen_embeddings = embeddings[chosen_idx, ...]
         rejected_embeddings = embeddings[rejected_idx, ...]
@@ -1274,7 +1208,8 @@ class _UnslothBCOTrainer(BaseTrainer):
 
     def _get_sample_prompt_embeddings(self, dataset: Dataset, sample_size: int = 512) -> torch.FloatTensor:
         """
-        Sample instances from dataset and get prompt embeddings. Used for density ratio classifier training.
+        Sample instances from dataset and get prompt embeddings.
+        Used for density ratio classifier training.
         """
         n_samples = min(len(dataset), sample_size)
         rand_indices = np.random.choice(len(dataset), size=(n_samples,))
@@ -1304,42 +1239,73 @@ class _UnslothBCOTrainer(BaseTrainer):
 
         return all_embeddings
 
+    def _prepare_deepspeed(self, model: PreTrainedModelWrapper):
+        # Adapted from accelerate: https://github.com/huggingface/accelerate/blob/739b135f8367becb67ffaada12fe76e3aa60fefd/src/accelerate/accelerator.py#L1473
+        deepspeed_plugin = self.accelerator.state.deepspeed_plugin
+        config_kwargs = deepcopy(deepspeed_plugin.deepspeed_config)
+
+        if model is not None:
+            if hasattr(model, "config"):
+                hidden_size = (
+                    max(model.config.hidden_sizes)
+                    if getattr(model.config, "hidden_sizes", None)
+                    else getattr(model.config, "hidden_size", None)
+                )
+                if hidden_size is not None and config_kwargs["zero_optimization"]["stage"] == 3:
+                    # Note that `stage3_prefetch_bucket_size` can produce DeepSpeed messages like: `Invalidate trace cache @ step 0: expected module 1, but got module 0`
+                    # This is expected and is not an error, see: https://github.com/microsoft/DeepSpeed/discussions/4081
+                    config_kwargs.update(
+                        {
+                            "zero_optimization.reduce_bucket_size": hidden_size * hidden_size,
+                            "zero_optimization.stage3_param_persistence_threshold": 10 * hidden_size,
+                            "zero_optimization.stage3_prefetch_bucket_size": 0.9 * hidden_size * hidden_size,
+                        }
+                    )
+
+        # If ZeRO-3 is used, we shard both the active and reference model.
+        # Otherwise, we assume the reference model fits in memory and is initialized on each device with ZeRO disabled (stage 0)
+        if config_kwargs["zero_optimization"]["stage"] != 3:
+            config_kwargs["zero_optimization"]["stage"] = 0
+        model, *_ = deepspeed.initialize(model=model, config=config_kwargs)
+        model.eval()
+        return model
+
     def _save_optimizer_and_scheduler(self, output_dir):
-        output_dir = output_dir if output_dir is not None else self.args.output_dir
         super()._save_optimizer_and_scheduler(output_dir)
 
-        if self.accelerator.is_main_process:
-            # When saving optimizer and scheduler to checkpoint, save also the running delta object.
-            self.running.save_to_json(os.path.join(output_dir, RUNNING_NAME))
+        # When saving optimizer and scheduler to checkpoint, save also the running delta object.
+        output_dir = output_dir if output_dir is not None else self.args.output_dir
 
-            if self.match_underlying_distribution:
-                joblib.dump(self.clf, os.path.join(output_dir, CLF_NAME), compress=True)
+        self.running.save_to_json(os.path.join(output_dir, RUNNING_NAME))
+
+        if self.match_underlying_distribution:
+            torch.save(self.clf.get_params(), os.path.join(output_dir, CLF_NAME))
 
     def _load_optimizer_and_scheduler(self, checkpoint):
-        if checkpoint is None:
-            logger.warning_once(f"Missing Checkpoint {checkpoint}")
-            return
-
         super()._load_optimizer_and_scheduler(checkpoint)
 
+        if checkpoint is None:
+            return
         # when loading optimizer and scheduler from checkpoint, also load the running delta object.
         running_file = os.path.join(checkpoint, RUNNING_NAME)
-        if os.path.isfile(running_file):
+        if not os.path.isfile(running_file):
+            warnings.warn(f"Missing file {running_file}. Will use a new running delta value for BCO loss calculation")
+        else:
             self.running = RunningMoments.load_from_json(self.accelerator, running_file)
 
         if self.match_underlying_distribution:
             clf_file = os.path.join(checkpoint, CLF_NAME)
-            if os.path.isfile(clf_file):
-                self.clf = joblib.load(clf_file)
+            if not os.path.isfile(running_file):
+                warnings.warn(f"Missing file {clf_file}. Will use a new UDM classifier for BCO loss calculation")
+            else:
+                self.clf.set_params(**torch.load(clf_file, weights_only=True, map_location="cpu"))
 
     @contextmanager
     def null_ref_context(self):
         """Context manager for handling null reference model (that is, peft adapter manipulation)."""
-        with (
-            self.accelerator.unwrap_model(self.model).disable_adapter()
-            if self.is_peft_model and not self.ref_adapter_name
-            else nullcontext()
-        ):
+        with self.accelerator.unwrap_model(
+            self.model
+        ).disable_adapter() if self.is_peft_model and not self.ref_adapter_name else nullcontext():
             if self.ref_adapter_name:
                 self.model.set_adapter(self.ref_adapter_name)
             yield
@@ -1426,7 +1392,7 @@ class _UnslothBCOTrainer(BaseTrainer):
 
         return super().get_eval_dataloader(eval_dataset=eval_dataset)
 
-    def compute_reference_log_probs(self, padded_batch: dict) -> dict:
+    def compute_reference_log_probs(self, padded_batch: Dict) -> Dict:
         """Computes log probabilities of the reference model for a single padded batch of a BCO specific dataset."""
         with torch.no_grad():
             if self.ref_model is None:
@@ -1481,22 +1447,11 @@ class _UnslothBCOTrainer(BaseTrainer):
 
         Args:
             logits: Logits of the model (unnormalized). Shape: (batch_size, sequence_length, vocab_size)
-            labels:
-                Labels for which to compute the log probabilities. Label tokens with a value of label_pad_token_id are
-                ignored. Shape: (batch_size, sequence_length)
-            average_log_prob:
-                If True, return the average log probability per (non-masked) token. Otherwise, return the sum of the
-                log probabilities of the (non-masked) tokens.
-            label_pad_token_id:
-                The label value to ignore when computing log probabilities.
-            is_encoder_decoder:
-                Whether the model is an encoder-decoder model. If True, the labels are not shifted, and the logits are
-                assumed to already be aligned with the labels. If False, the labels are shifted to the right by one
-                position, and the logits are assumed to be aligned with the shifted labels.
+            labels: Labels for which to compute the log probabilities. Label tokens with a value of label_pad_token_id are ignored. Shape: (batch_size, sequence_length)
+            average_log_prob: If True, return the average log probability per (non-masked) token. Otherwise, return the sum of the log probabilities of the (non-masked) tokens.
 
         Returns:
-            A tensor of shape (batch_size,) containing the average/sum log probabilities of the given labels under the
-            given logits.
+            A tensor of shape (batch_size,) containing the average/sum log probabilities of the given labels under the given logits.
         """
         if logits.shape[:-1] != labels.shape:
             raise ValueError("Logits (batch and sequence length dim) and labels must have the same shape.")
@@ -1513,7 +1468,7 @@ class _UnslothBCOTrainer(BaseTrainer):
         # dummy token; we'll ignore the losses on these tokens later
         labels[labels == label_pad_token_id] = 0
 
-        per_token_logps = selective_log_softmax(logits, labels)
+        per_token_logps = torch.gather(logits.log_softmax(-1), dim=2, index=labels.unsqueeze(2)).squeeze(2)
 
         if average_log_prob:
             return (per_token_logps * loss_mask).sum(-1) / loss_mask.sum(-1)
@@ -1521,8 +1476,8 @@ class _UnslothBCOTrainer(BaseTrainer):
             return (per_token_logps * loss_mask).sum(-1)
 
     def forward(
-        self, model: nn.Module, batch: dict[str, Union[list, torch.LongTensor]]
-    ) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+        self, model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]]
+    ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
         model_kwargs = (
             {
                 "labels": batch["completion_labels"],
@@ -1586,43 +1541,49 @@ class _UnslothBCOTrainer(BaseTrainer):
         reference_rejected_logps: torch.FloatTensor,
         chosen_embeddings: Optional[torch.FloatTensor],
         rejected_embeddings: Optional[torch.FloatTensor],
-        do_train: bool = True,
-    ) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+    ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
         """Compute the BCO loss for a batch of policy and reference model log probabilities.
 
         Args:
-            policy_chosen_logps:
-                Log probabilities of the policy model for the chosen responses. Shape: (num(chosen) in batch_size,)
-            policy_rejected_logps:
-                Log probabilities of the policy model for the rejected responses. Shape: (num(rejected) in batch_size,)
-            reference_chosen_logps:
-                Log probabilities of the reference model for the chosen responses. Shape: (num(chosen) in batch_size,)
-            reference_rejected_logps:
-                Log probabilities of the reference model for the rejected responses. Shape: (num(rejected) in
-                batch_size,)
+            policy_chosen_logps: Log probabilities of the policy model for the chosen responses. Shape: (num(chosen) in batch_size,)
+            policy_rejected_logps: Log probabilities of the policy model for the rejected responses. Shape: (num(rejected) in batch_size,)
+            reference_chosen_logps: Log probabilities of the reference model for the chosen responses. Shape: (num(chosen) in batch_size,)
+            reference_rejected_logps: Log probabilities of the reference model for the rejected responses. Shape: (num(rejected) in batch_size,)
             chosen_embeddings: embeddings of desirable prompts
             rejected_embeddings: embeddings of undesirable prompts
-            do_train: whether to update the running delta value. Default is True.
 
         Returns:
-            A tuple of four tensors: (losses, chosen_rewards, rejected_rewards, delta). The losses tensor contains the
-            BCO loss for each example in the batch. The chosen_rewards and rejected_rewards tensors contain the rewards
-            for the chosen and rejected responses, respectively. The delta value contains the moving average of all
-            implicit rewards.
+            A tuple of four tensors: (losses, chosen_rewards, rejected_rewards, delta).
+            The losses tensor contains the BCO loss for each example in the batch.
+            The chosen_rewards and rejected_rewards tensors contain the rewards for the chosen and rejected responses, respectively.
+            The delta value contains the moving average of all implicit rewards.
         """
 
-        chosen_logratios = policy_chosen_logps - reference_chosen_logps
-        chosen_rewards = self.beta * chosen_logratios
+        if policy_chosen_logps.shape[0] != 0 or reference_chosen_logps.shape[0] != 0:
+            chosen_logratios = policy_chosen_logps - reference_chosen_logps
+            chosen_rewards = self.beta * chosen_logratios
+        else:
+            # lists can't be empty -- if they are, then accelerate.gather will hang
+            chosen_losses = torch.Tensor([]).to(self.accelerator.device)
+            chosen_rewards = torch.Tensor([]).to(self.accelerator.device)
 
-        rejected_logratios = policy_rejected_logps - reference_rejected_logps
-        rejected_rewards = self.beta * rejected_logratios
+        if policy_rejected_logps.shape[0] != 0 or reference_rejected_logps.shape[0] != 0:
+            rejected_logratios = policy_rejected_logps - reference_rejected_logps
+            rejected_rewards = self.beta * rejected_logratios
+        else:
+            # lists can't be empty -- if they are, then accelerate.gather will hang
+            rejected_losses = torch.Tensor([]).to(self.accelerator.device)
+            rejected_rewards = torch.Tensor([]).to(self.accelerator.device)
 
-        if do_train:
-            self.running.update(torch.cat((chosen_rewards, rejected_rewards), 0).detach())
-        delta = torch.as_tensor(self.running.mean, device=chosen_rewards.device)
+        rewards = torch.cat((chosen_rewards, rejected_rewards), 0).mean().detach()
+        self.running.update(rewards)
+        delta = self.running.mean
 
-        chosen_losses = -F.logsigmoid(chosen_rewards - delta)
-        rejected_losses = -F.logsigmoid(-(rejected_rewards - delta))
+        if policy_chosen_logps.shape[0] != 0 or reference_chosen_logps.shape[0] != 0:
+            chosen_losses = -F.logsigmoid(chosen_rewards - delta)
+
+        if policy_rejected_logps.shape[0] != 0 or reference_rejected_logps.shape[0] != 0:
+            rejected_losses = -F.logsigmoid(-(rejected_rewards - delta))
 
         if self.match_underlying_distribution:
             chosen_weight = torch.ones_like(chosen_losses)
@@ -1632,13 +1593,12 @@ class _UnslothBCOTrainer(BaseTrainer):
         else:
             losses = torch.cat((chosen_losses, rejected_losses), dim=0)
 
-        return losses, chosen_rewards, rejected_rewards, delta
+        return losses, chosen_rewards, rejected_rewards, torch.as_tensor(delta)
 
     def get_batch_loss_metrics(
         self,
         model,
-        batch: dict[str, Union[list, torch.LongTensor]],
-        do_train: bool = True,
+        batch: Dict[str, Union[List, torch.LongTensor]],
     ):
         """Compute the BCO loss and other metrics for the given batch of inputs for train or test."""
         metrics = {}
@@ -1688,56 +1648,43 @@ class _UnslothBCOTrainer(BaseTrainer):
             reference_rejected_logps,
             chosen_embeddings,
             rejected_embeddings,
-            do_train=do_train,
         )
-        metrics["delta"] = self.accelerator.gather_for_metrics(delta).mean().item()
+        metrics["delta"] = delta.item()
 
         num_chosen = torch.Tensor([len(chosen_rewards)]).to(self.accelerator.device)
         num_rejected = torch.Tensor([len(rejected_rewards)]).to(self.accelerator.device)
 
-        all_num_chosen = self.accelerator.gather_for_metrics(num_chosen).sum().item()
-        all_num_rejected = self.accelerator.gather_for_metrics(num_rejected).sum().item()
+        all_num_chosen = self.accelerator.gather(num_chosen).sum().item()
+        all_num_rejected = self.accelerator.gather(num_rejected).sum().item()
 
         if all_num_chosen > 0:
-            metrics["rewards/chosen_sum"] = (
-                self.accelerator.gather_for_metrics(chosen_rewards.nansum()).nansum().item()
-            )
-            metrics["logps/chosen_sum"] = (
-                self.accelerator.gather_for_metrics(policy_chosen_logps.nansum()).nansum().item()
-            )
-            metrics["logits/chosen_sum"] = (
-                self.accelerator.gather_for_metrics(policy_chosen_logits.nansum()).nansum().item()
-            )
+            metrics["rewards/chosen_sum"] = self.accelerator.gather(chosen_rewards.nansum()).nansum().item()
+            metrics["logps/chosen_sum"] = self.accelerator.gather(policy_chosen_logps.nansum()).nansum().item()
             metrics["count/chosen"] = all_num_chosen
 
         if all_num_rejected > 0:
-            metrics["rewards/rejected_sum"] = (
-                self.accelerator.gather_for_metrics(rejected_rewards.nansum()).nansum().item()
-            )
-            metrics["logps/rejected_sum"] = (
-                self.accelerator.gather_for_metrics(policy_rejected_logps.nansum()).nansum().item()
-            )
-            metrics["logits/rejected_sum"] = (
-                self.accelerator.gather_for_metrics(policy_rejected_logits.nansum()).nansum().item()
-            )
+            metrics["rewards/rejected_sum"] = self.accelerator.gather(rejected_rewards.nansum()).nansum().item()
+            metrics["logps/rejected_sum"] = self.accelerator.gather(policy_rejected_logps.nansum()).nansum().item()
             metrics["count/rejected"] = all_num_rejected
 
         loss = losses.nanmean()
         if self.aux_loss_enabled:
-            loss += self.aux_loss_coef * aux_loss
+            loss += getattr(model.config, "router_aux_loss_coef", 0.0) * aux_loss
 
         return loss, metrics
 
     def compute_loss(
         self,
         model: Union[PreTrainedModel, nn.Module],
-        inputs: dict[str, Union[torch.Tensor, Any]],
+        inputs: Dict[str, Union[torch.Tensor, Any]],
         return_outputs=False,
-        num_items_in_batch=None,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, dict[str, torch.Tensor]]]:
-        compute_loss_context_manager = (
-            autocast(self.accelerator.device.type) if self._peft_has_been_casted_to_bf16 else nullcontext()
-        )
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, Dict[str, torch.Tensor]]]:
+        if not self.use_dpo_data_collator:
+            warnings.warn(
+                "compute_loss is only implemented for DPODataCollatorWithPadding, and you passed a datacollator that is different than "
+                "DPODataCollatorWithPadding - you might see unexpected behavior. Alternatively, you can implement your own prediction_step method if you are using a custom data collator"
+            )
+        compute_loss_context_manager = amp.autocast("cuda") if self._peft_has_been_casted_to_bf16 else nullcontext()
 
         with compute_loss_context_manager:
             loss, metrics = self.get_batch_loss_metrics(model, inputs)
@@ -1752,32 +1699,28 @@ class _UnslothBCOTrainer(BaseTrainer):
             return (loss, metrics)
         return loss
 
-    def store_metrics(self, metrics: dict[str, float], train_eval: Literal["train", "eval"] = "train") -> None:
+    def store_metrics(self, metrics: Dict[str, float], train_eval: Literal["train", "eval"] = "train") -> None:
         for key, value in metrics.items():
             self._stored_metrics[train_eval][key].append(value)
 
-    def _get_train_sampler(self, dataset: Optional[Dataset] = None) -> Optional[torch.utils.data.Sampler]:
-        if dataset is None:
-            dataset = self.train_dataset
-        if dataset is None or not has_length(dataset):
+    def _get_train_sampler(self) -> Optional[torch.utils.data.Sampler]:
+        if self.train_dataset is None or not has_length(self.train_dataset):
             return None
-        return SequentialSampler(dataset)
+        return SequentialSampler(self.train_dataset)
 
-    def generate_from_model_and_ref(self, model, batch: dict[str, torch.LongTensor]) -> tuple[str, str]:
+    def get_batch_samples(self, model, batch: Dict[str, torch.LongTensor]) -> Tuple[str, str]:
         """Generate samples from the model and reference model for the given batch of inputs."""
 
         # If one uses `generate_during_eval` with peft + bf16, we need to explicitly call generate with
-        # the torch amp context manager as some hidden states are silently casted to full precision.
-        generate_context_manager = (
-            autocast(self.accelerator.device.type) if self._peft_has_been_casted_to_bf16 else nullcontext()
-        )
+        # the torch cuda amp context manager as some hidden states are silently casted to full precision.
+        generate_context_manager = amp.autocast("cuda") if self._peft_has_been_casted_to_bf16 else nullcontext()
         with generate_context_manager:
             policy_output = model.generate(
                 input_ids=batch["prompt_input_ids"],
                 attention_mask=batch["prompt_attention_mask"],
                 max_length=self.max_length,
                 do_sample=True,
-                pad_token_id=self.processing_class.pad_token_id,
+                pad_token_id=self.tokenizer.pad_token_id,
             )
 
             # if reference_output in batch use that otherwise use the reference model
@@ -1791,7 +1734,7 @@ class _UnslothBCOTrainer(BaseTrainer):
                             attention_mask=batch["prompt_attention_mask"],
                             max_length=self.max_length,
                             do_sample=True,
-                            pad_token_id=self.processing_class.pad_token_id,
+                            pad_token_id=self.tokenizer.pad_token_id,
                         )
                 else:
                     reference_output = self.ref_model.generate(
@@ -1799,35 +1742,38 @@ class _UnslothBCOTrainer(BaseTrainer):
                         attention_mask=batch["prompt_attention_mask"],
                         max_length=self.max_length,
                         do_sample=True,
-                        pad_token_id=self.processing_class.pad_token_id,
+                        pad_token_id=self.tokenizer.pad_token_id,
                     )
 
-        policy_output = pad_to_length(policy_output, self.max_length, self.processing_class.pad_token_id)
-        policy_output_decoded = self.processing_class.batch_decode(policy_output, skip_special_tokens=True)
+        policy_output = pad_to_length(policy_output, self.max_length, self.tokenizer.pad_token_id)
+        policy_output_decoded = self.tokenizer.batch_decode(policy_output, skip_special_tokens=True)
 
-        reference_output = pad_to_length(reference_output, self.max_length, self.processing_class.pad_token_id)
-        reference_output_decoded = self.processing_class.batch_decode(reference_output, skip_special_tokens=True)
+        reference_output = pad_to_length(reference_output, self.max_length, self.tokenizer.pad_token_id)
+        reference_output_decoded = self.tokenizer.batch_decode(reference_output, skip_special_tokens=True)
 
         return policy_output_decoded, reference_output_decoded
 
     def prediction_step(
         self,
         model: Union[PreTrainedModel, nn.Module],
-        inputs: dict[str, Union[torch.Tensor, Any]],
+        inputs: Dict[str, Union[torch.Tensor, Any]],
         prediction_loss_only: bool,
-        ignore_keys: Optional[list[str]] = None,
+        ignore_keys: Optional[List[str]] = None,
     ):
+        if not self.use_dpo_data_collator:
+            warnings.warn(
+                "prediction_step is only implemented for DPODataCollatorWithPadding, and you passed a datacollator that is different than "
+                "DPODataCollatorWithPadding - you might see unexpected behavior. Alternatively, you can implement your own prediction_step method if you are using a custom data collator"
+            )
         if ignore_keys is None:
             if hasattr(model, "config"):
                 ignore_keys = getattr(model.config, "keys_to_ignore_at_inference", [])
             else:
                 ignore_keys = []
 
-        prediction_context_manager = (
-            autocast(self.accelerator.device.type) if self._peft_has_been_casted_to_bf16 else nullcontext()
-        )
+        prediction_context_manager = amp.autocast("cuda") if self._peft_has_been_casted_to_bf16 else nullcontext()
         with torch.no_grad(), prediction_context_manager:
-            loss, metrics = self.get_batch_loss_metrics(model, inputs, do_train=False)
+            loss, metrics = self.get_batch_loss_metrics(model, inputs)
 
         # force log the metrics
         if self.accelerator.is_main_process:
@@ -1837,13 +1783,12 @@ class _UnslothBCOTrainer(BaseTrainer):
             return (loss.detach(), None, None)
 
         # logits for the chosen and rejected samples from model
-        logits_dict = {}
-        if "logits/chosen_sum" in metrics:
-            logits_dict["eval_logits/chosen"] = metrics["logits/chosen_sum"]
-        if "logits/rejected_sum" in metrics:
-            logits_dict["eval_logits/rejected"] = metrics["logits/rejected_sum"]
-        logits = [v for k, v in logits_dict.items() if k not in ignore_keys]
-        logits = torch.tensor(logits, device=self.accelerator.device)
+        logits_dict = {
+            "eval_logits/chosen": metrics["logits/chosen"],
+            "eval_logits/rejected": metrics["logits/rejected"],
+        }
+        logits = tuple(v.unsqueeze(dim=0) for k, v in logits_dict.items() if k not in ignore_keys)
+        logits = torch.stack(logits).mean(axis=1).to(self.accelerator.device)
         labels = torch.zeros(logits.shape[0], device=self.accelerator.device)
 
         return (loss.detach(), logits, labels)
@@ -1853,12 +1798,12 @@ class _UnslothBCOTrainer(BaseTrainer):
         dataloader: DataLoader,
         description: str,
         prediction_loss_only: Optional[bool] = None,
-        ignore_keys: Optional[list[str]] = None,
+        ignore_keys: Optional[List[str]] = None,
         metric_key_prefix: str = "eval",
     ) -> EvalLoopOutput:
         """
-        Overriding built-in evaluation loop to store metrics for each batch. Prediction/evaluation loop, shared by
-        `Trainer.evaluate()` and `Trainer.predict()`.
+        Overriding built-in evaluation loop to store metrics for each batch.
+        Prediction/evaluation loop, shared by `Trainer.evaluate()` and `Trainer.predict()`.
 
         Works both with or without labels.
         """
@@ -1874,30 +1819,28 @@ class _UnslothBCOTrainer(BaseTrainer):
             random_batch = self.data_collator(random_batch_dataset)
             random_batch = self._prepare_inputs(random_batch)
 
-            target_labels = torch.tensor(random_batch["label"], dtype=torch.bool, device=self.accelerator.device)
-            target_indices = torch.where(~target_labels)[0]
+            target_indicies = [i for i in range(len(random_batch["delta"])) if random_batch["delta"][i] is False]
             target_batch = {
-                "prompt_input_ids": random_batch["prompt_input_ids"][target_indices],
-                "prompt_attention_mask": random_batch["prompt_attention_mask"][target_indices],
-                "prompt": itemgetter(*target_indices)(random_batch["prompt"]),
+                "prompt_input_ids": itemgetter(*target_indicies)(random_batch["prompt_input_ids"]),
+                "prompt_attention_mask": itemgetter(*target_indicies)(random_batch["prompt_attention_mask"]),
+                "prompt": itemgetter(*target_indicies)(random_batch["prompt"]),
             }
-            policy_output_decoded, ref_output_decoded = self.generate_from_model_and_ref(self.model, target_batch)
+            policy_output_decoded, ref_output_decoded = self.get_batch_samples(self.model, target_batch)
 
-            table = pd.DataFrame(
-                columns=["Prompt", "Policy", "Ref Model"],
-                data=[
-                    [prompt, pol[len(prompt) :], ref[len(prompt) :]]
-                    for prompt, pol, ref in zip(target_batch["prompt"], policy_output_decoded, ref_output_decoded)
-                ],
+            self.log(
+                {
+                    "game_log": wandb.Table(
+                        columns=["Prompt", "Policy", "Ref Model"],
+                        rows=[
+                            [prompt, pol[len(prompt) :], ref[len(prompt) :]]
+                            for prompt, pol, ref in zip(
+                                target_batch["prompt"], policy_output_decoded, ref_output_decoded
+                            )
+                        ],
+                    )
+                }
             )
-            if "wandb" in self.args.report_to:
-                wandb.log({"game_log": wandb.Table(data=table)})
-
-            if "comet_ml" in self.args.report_to:
-                log_table_to_comet_experiment(
-                    name="game_log.csv",
-                    table=table,
-                )
+            self.state.log_history.pop()
 
         # Base evaluation
         initial_output = super().evaluation_loop(
@@ -1906,15 +1849,13 @@ class _UnslothBCOTrainer(BaseTrainer):
 
         return initial_output
 
-    def log(self, logs: dict[str, float], start_time: Optional[float] = None) -> None:
+    def log(self, logs: Dict[str, float]) -> None:
         """
         Log `logs` on the various objects watching training, including stored metrics.
 
         Args:
-            logs (`dict[str, float]`):
+            logs (`Dict[str, float]`):
                 The values to log.
-            start_time (`float`, *optional*):
-                Start time of the training.
         """
         # logs either has 'loss' or 'eval_loss'
         train_eval = "train" if "loss" in logs else "eval"
@@ -1924,14 +1865,14 @@ class _UnslothBCOTrainer(BaseTrainer):
         for split in ["chosen", "rejected"]:
             if f"count/{split}" in self._stored_metrics[train_eval]:
                 count_sum = torch.Tensor(self._stored_metrics[train_eval][f"count/{split}"]).sum().item()
-                for metric in ["rewards", "logps", "logits"]:
-                    logs[f"{prefix}{metric}/{split}"] = (
-                        torch.Tensor(self._stored_metrics[train_eval][f"{metric}/{split}_sum"]).sum().item()
-                        / count_sum
-                    )
-                    # delete obsolete metric
-                    del self._stored_metrics[train_eval][f"{metric}/{split}_sum"]
-                del self._stored_metrics[train_eval][f"count/{split}"]
+                logs[f"{prefix}rewards/{split}"] = (
+                    torch.Tensor(self._stored_metrics[train_eval][f"rewards/{split}_sum"]).sum().item() / count_sum
+                )
+                logs[f"{prefix}logps/{split}"] = (
+                    torch.Tensor(self._stored_metrics[train_eval][f"logps/{split}_sum"]).sum().item() / count_sum
+                )
+                for key in [f"count/{split}", f"rewards/{split}_sum", f"logps/{split}_sum"]:
+                    del self._stored_metrics[train_eval][key]
         # calculate reward margin
         if f"{prefix}rewards/chosen" in logs and f"{prefix}rewards/rejected" in logs:
             logs[f"{prefix}rewards/margins"] = logs[f"{prefix}rewards/chosen"] - logs[f"{prefix}rewards/rejected"]
@@ -1939,57 +1880,59 @@ class _UnslothBCOTrainer(BaseTrainer):
         for key, metrics in self._stored_metrics[train_eval].items():
             logs[f"{prefix}{key}"] = torch.Tensor(metrics).mean().item()
         del self._stored_metrics[train_eval]
-        return super().log(logs, start_time)
+        return super().log(logs)
 
-    # Ensure the model card is saved along with the checkpoint
-    def _save_checkpoint(self, model, trial):
-        if self.args.hub_model_id is None:
-            model_name = Path(self.args.output_dir).name
-        else:
-            model_name = self.args.hub_model_id.split("/")[-1]
-        self.create_model_card(model_name=model_name)
-        super()._save_checkpoint(model, trial)
+    @wraps(Trainer.push_to_hub)
+    def push_to_hub(
+        self,
+        commit_message: Optional[str] = "End of training",
+        blocking: bool = True,
+        **kwargs,
+    ) -> str:
+        """
+        Overwrite the `push_to_hub` method in order to force-add the tag "bco" when pushing the
+        model on the Hub. Please refer to `~transformers.Trainer.push_to_hub` for more details.
+        Unlike the parent class, we don't use the `token` argument to mitigate security risks.
+        """
+        kwargs = trl_sanitze_kwargs_for_tagging(model=self.model, tag_names=self._tag_names, kwargs=kwargs)
+        return super().push_to_hub(commit_message=commit_message, blocking=blocking, **kwargs)
 class UnslothBCOTrainer(_UnslothBCOTrainer):
     """
     
-    Initialize BCOTrainer from [BCO](https://huggingface.co/papers/2404.04656) paper.
+    Initialize BCOTrainer from [BCO](https://arxiv.org/abs/2404.04656) paper.
 
     Args:
-        model ([`~transformers.PreTrainedModel`]):
-            The model to train, preferably an [`~transformers.AutoModelForSequenceClassification`].
-        ref_model ([`PreTrainedModelWrapper`]):
-            Hugging Face transformer model with a casual language modelling head. Used for implicit reward computation
-            and loss. If no reference model is provided, the trainer will create a reference model with the same
-            architecture as the model to be optimized.
-        args ([`BCOConfig`]):
+        model (`transformers.PreTrainedModel`):
+            The model to train, preferably an `AutoModelForSequenceClassification`.
+        ref_model (`PreTrainedModelWrapper`):
+            Hugging Face transformer model with a casual language modelling head. Used for implicit reward computation and loss. If no
+            reference model is provided, the trainer will create a reference model with the same architecture as the model to be optimized.
+        args (`BCOConfig`):
             The arguments to use for training.
-        train_dataset ([`~datasets.Dataset`]):
+        train_dataset (`datasets.Dataset`):
             The dataset to use for training.
-        eval_dataset ([`~datasets.Dataset`]):
+        eval_dataset (`datasets.Dataset`):
             The dataset to use for evaluation.
-        processing_class ([`~transformers.PreTrainedTokenizerBase`], [`~transformers.BaseImageProcessor`], [`~transformers.FeatureExtractionMixin`] or [`~transformers.ProcessorMixin`], *optional*):
-            Processing class used to process the data. If provided, will be used to automatically process the inputs
-            for the model, and it will be saved along the model to make it easier to rerun an interrupted training or
-            reuse the fine-tuned model.
-        data_collator ([`~transformers.DataCollator`], *optional*):
-            The data collator to use for training. If None is specified, the default data collator
-            ([`DPODataCollatorWithPadding`]) will be used which will pad the sequences to the maximum length of the
-            sequences in the batch, given a dataset of paired sequences.
+        tokenizer (`transformers.PreTrainedTokenizerBase`):
+            The tokenizer to use for training. This argument is required if you want to use the default data collator.
+        data_collator (`transformers.DataCollator`, *optional*, defaults to `None`):
+            The data collator to use for training. If None is specified, the default data collator (`DPODataCollatorWithPadding`) will be used
+            which will pad the sequences to the maximum length of the sequences in the batch, given a dataset of paired sequences.
         model_init (`Callable[[], transformers.PreTrainedModel]`):
-            The model initializer to use for training. If None is specified, the default model initializer will be
-            used.
-        callbacks (`list[transformers.TrainerCallback]`):
+            The model initializer to use for training. If None is specified, the default model initializer will be used.
+        callbacks (`List[transformers.TrainerCallback]`):
             The callbacks to use for training.
-        optimizers (`tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR]`):
+        optimizers (`Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR]`):
             The optimizer and scheduler to use for training.
         preprocess_logits_for_metrics (`Callable[[torch.Tensor, torch.Tensor], torch.Tensor]`):
             The function to use to preprocess the logits before computing the metrics.
-        peft_config (`dict`, defaults to `None`):
-            The PEFT configuration to use for training. If you pass a PEFT configuration, the model will be wrapped in
-            a PEFT model.
-        compute_metrics (`Callable[[EvalPrediction], dict]`, *optional*):
-            The function to use to compute the metrics. Must take a `EvalPrediction` and return a dictionary string to
-            metric values.
+        peft_config (`Dict`, defaults to `None`):
+            The PEFT configuration to use for training. If you pass a PEFT configuration, the model will be wrapped in a PEFT model.
+        disable_dropout (`bool`, defaults to `True`):
+            Whether or not to disable dropouts in `model` and `ref_model`.
+        compute_metrics (`Callable[[EvalPrediction], Dict]`, *optional*):
+            The function to use to compute the metrics. Must take a `EvalPrediction` and return
+            a dictionary string to metric values.
         model_adapter_name (`str`, defaults to `None`):
             Name of the train target PEFT adapter, when using LoRA with multiple adapters.
         ref_adapter_name (`str`, defaults to `None`):
@@ -2003,7 +1946,7 @@ class UnslothBCOTrainer(_UnslothBCOTrainer):
         args = None,
         train_dataset = None,
         eval_dataset = None,
-        processing_class = None,
+        tokenizer = None,
         data_collator = None,
         model_init = None,
         callbacks = None,
@@ -2168,7 +2111,7 @@ class UnslothBCOTrainer(_UnslothBCOTrainer):
             args = args,
             train_dataset = train_dataset,
             eval_dataset = eval_dataset,
-            processing_class = processing_class,
+            tokenizer = tokenizer,
             data_collator = data_collator,
             model_init = model_init,
             callbacks = callbacks,
@@ -2206,13 +2149,3 @@ class UnslothBCOTrainer(_UnslothBCOTrainer):
         pass
         
 pass
-
-
-if hasattr(logger, "addFilter"):
-    import logging
-    class HideLoggingMessage(logging.Filter):
-        def __init__(self, text): self.text = text
-        def filter(self, x): return not (self.text in x.getMessage())
-    pass
-    logger.addFilter(HideLoggingMessage("`use_cache=True`"))
-

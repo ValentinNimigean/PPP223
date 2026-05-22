@@ -13,7 +13,7 @@ param (
 $ErrorActionPreference = "Stop"
 
 if (-not $OllamaBaseModel) {
-    $OllamaBaseModel = "qwen2.5-coder:3b"
+    $OllamaBaseModel = "qwen2.5-coder:1.5b"
 }
 
 # Activate virtual environment if present

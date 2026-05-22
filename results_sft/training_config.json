@@ -1,6 +1,6 @@
 {
   "model_id": "unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit",
-  "dataset_path": "synthetic_qa_combined_2048.jsonl",
+  "dataset_path": "training_data/sft/synthetic_qa_combined_2048.jsonl",
   "output_dir": "results_sft",
   "epochs": 3,
   "max_seq_length": 2048,
@@ -13,10 +13,10 @@
   "seed": 3407,
   "max_samples": null,
   "token_audit": {
-    "rows": 31,
-    "max": 107,
-    "mean": 91,
-    "p95": 104,
+    "rows": 372,
+    "max": 84,
+    "mean": 70,
+    "p95": 81,
     "over_limit": 0
   }
 }

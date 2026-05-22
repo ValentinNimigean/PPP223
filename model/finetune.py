@@ -13,6 +13,7 @@ import torch
 try:
     from unsloth import FastLanguageModel
     from datasets import Dataset, load_dataset
+    from transformers import DataCollatorForSeq2Seq
     from trl import SFTConfig, SFTTrainer
 except ImportError as exc:
     raise ImportError(
@@ -117,6 +118,24 @@ def token_audit(dataset: Dataset, tokenizer, max_seq_length: int) -> Dict[str, A
     }
 
 
+def tokenize_dataset(dataset: Dataset, tokenizer, max_seq_length: int) -> Dataset:
+    def tokenize_batch(examples):
+        batch = tokenizer(
+            examples["text"],
+            truncation=True,
+            max_length=max_seq_length,
+            padding=False,
+        )
+        batch["labels"] = [ids[:] for ids in batch["input_ids"]]
+        return batch
+
+    return dataset.map(
+        tokenize_batch,
+        batched=True,
+        remove_columns=dataset.column_names,
+    )
+
+
 def split_dataset(dataset: Dataset, eval_split: float, seed: int):
     if eval_split <= 0 or len(dataset) < 10:
         return dataset, None
@@ -130,7 +149,13 @@ def build_sft_trainer(model, tokenizer, cfg, train_dataset, eval_dataset=None):
         "model": model,
         "args": cfg,
         "train_dataset": train_dataset,
-        "dataset_text_field": "text",
+        "data_collator": DataCollatorForSeq2Seq(
+            tokenizer=tokenizer,
+            model=model,
+            padding=True,
+            label_pad_token_id=-100,
+            return_tensors="pt",
+        ),
     }
 
     if eval_dataset is not None:
@@ -230,6 +255,8 @@ def run_finetuning(
                 print("...")
         print("Dry run complete. Exiting without training.")
         return
+
+    dataset = tokenize_dataset(dataset, tokenizer, max_seq_length=max_seq_length)
 
     if not torch.cuda.is_available():
         raise EnvironmentError("CUDA GPU required for training. Aborting.")
