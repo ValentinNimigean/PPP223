@@ -9,7 +9,7 @@ fi
 REPO="."
 TEACHER_MODEL="gpt-4o"
 STUDENT_URL=""
-OLLAMA_BASE_MODEL="${OLLAMA_MODEL:-qwen2.5-coder:3b}"
+OLLAMA_BASE_MODEL="${OLLAMA_MODEL:-qwen2.5-coder:1.5b}"
 SFT_BASE_MODEL="unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit"
 
 SKIP_SYNTH=0
