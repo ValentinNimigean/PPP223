@@ -2,18 +2,20 @@ from openai import OpenAI
 from typing import List, Dict, Any
 import time
 
+import os
+
 class LocalInferenceEngine:
     """
     Wraps a locally-running Ollama model for direct (non-agent) inference.
     Used for batch evaluation and output sampling during DPO data collection.
     """
     def __init__(self, base_url: str = "http://localhost:11434/v1",
-                 model: str = "qwen2.5-coder:3b"):
+                 model: str = None):
         self.client = OpenAI(
             base_url=base_url,
             api_key="ollama-local" # any string works for ollama
         )
-        self.model = model
+        self.model = model or os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b")
 
     def generate(self, prompt: str, system: str = "", temperature: float = 0.2,
                  max_tokens: int = 512) -> str:

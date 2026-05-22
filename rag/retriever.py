@@ -71,13 +71,53 @@ class HybridRetriever:
 
         try:
             self.client = QdrantClient(":memory:")
-            self.client.set_model(dense_model)
+            
+            import os
+            # Automatically check for local .fastembed_cache directory in repo root
+            root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            local_cache = os.path.join(root_dir, ".fastembed_cache")
+            
+            set_model_kwargs = {}
+            set_sparse_kwargs = {}
+            
+            if os.path.isdir(local_cache):
+                logger.info("Found local model cache at %s. Loading offline.", local_cache)
+                set_model_kwargs["cache_dir"] = local_cache
+                set_model_kwargs["local_files_only"] = True
+                set_sparse_kwargs["cache_dir"] = local_cache
+                set_sparse_kwargs["local_files_only"] = True
+            
+            self.client.set_model(dense_model, **set_model_kwargs)
+            
+            # Verify if the environment can run fastembed sparse models without a hard crash (e.g. py_rust_stemmers segfault under Python 3.14 on Windows)
+            import subprocess
+            import sys
+            can_run_sparse = False
             try:
-                self.client.set_sparse_model(sparse_model)
-                self.sparse_ready = True
-            except Exception as exc:
+                cmd = [sys.executable, "-c", "from py_rust_stemmers import SnowballStemmer; SnowballStemmer('english')"]
+                result = subprocess.run(cmd, capture_output=True, timeout=5)
+                can_run_sparse = (result.returncode == 0)
+            except Exception:
+                pass
+            
+            if can_run_sparse:
+                try:
+                    self.client.set_sparse_model(sparse_model, **set_sparse_kwargs)
+                    self.sparse_ready = True
+                except TypeError:
+                    # Fallback for older qdrant-client versions
+                    try:
+                        self.client.set_sparse_model(sparse_model)
+                        self.sparse_ready = True
+                    except Exception as exc:
+                        self.sparse_ready = False
+                        logger.warning("Could not initialize sparse model %s: %s", sparse_model, exc)
+                except Exception as exc:
+                    self.sparse_ready = False
+                    logger.warning("Could not initialize sparse model %s: %s", sparse_model, exc)
+            else:
                 self.sparse_ready = False
-                logger.warning("Could not initialize sparse model %s: %s", sparse_model, exc)
+                logger.warning("Sparse embedding models (BM25) are not supported or unstable in this environment. Falling back to dense-only Qdrant search.")
         except Exception as exc:
             logger.warning("Could not initialize Qdrant; using lexical fallback only: %s", exc)
             self.client = None
@@ -158,10 +198,20 @@ class HybridRetriever:
             print(f"Qdrant ingestion failed; lexical fallback index is ready: {exc}")
 
     def _format_qdrant_point(self, point: Any) -> Dict[str, Any]:
-        payload = point.payload or {}
-        doc_text = payload.get("document", "")
+        # Handle high-level QueryResponse from client.query
+        if hasattr(point, "metadata") and point.metadata is not None:
+            metadata = point.metadata or {}
+            doc_text = getattr(point, "document", "") or metadata.get("document", "")
+            user_meta = {k: v for k, v in metadata.items() if k != "document"}
+            return {
+                "document": doc_text,
+                "metadata": user_meta,
+                "score": float(getattr(point, "score", 0.0) or 0.0),
+            }
 
-        # qdrant-client stores user metadata next to the document payload.
+        # Handle standard ScoredPoint from query_points or search
+        payload = getattr(point, "payload", {}) or {}
+        doc_text = payload.get("document", "")
         metadata = {k: v for k, v in payload.items() if k != "document"}
 
         return {

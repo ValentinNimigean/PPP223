@@ -9,7 +9,7 @@ fi
 REPO="."
 TEACHER_MODEL="gpt-4o"
 STUDENT_URL=""
-OLLAMA_BASE_MODEL="qwen2.5-coder:1.5b"
+OLLAMA_BASE_MODEL="${OLLAMA_MODEL:-qwen2.5-coder:3b}"
 SFT_BASE_MODEL="unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit"
 
 SKIP_SYNTH=0
@@ -64,6 +64,8 @@ echo "Ollama eval model: $OLLAMA_BASE_MODEL"
 echo "SFT base model:    $SFT_BASE_MODEL"
 echo "========================================"
 
+mkdir -p training_data/sft training_data/preferences evaluation_reports
+
 if [[ "$SKIP_EVAL" -eq 0 ]]; then
   echo ""
   echo "========================================"
@@ -73,7 +75,7 @@ if [[ "$SKIP_EVAL" -eq 0 ]]; then
     --repo "$REPO" \
     --model "$OLLAMA_BASE_MODEL" \
     --benchmark eval/benchmark_self.json \
-    --out eval_report_base.json \
+    --out evaluation_reports/eval_report_base.json \
     --verbose || true
 fi
 
@@ -84,7 +86,7 @@ if [[ "$SKIP_SYNTH" -eq 0 ]]; then
   echo "========================================"
   python data/synth.py \
     --repo "$REPO" \
-    --out synthetic_qa_auto.jsonl \
+    --out training_data/sft/synthetic_qa_auto.jsonl \
     --model "$TEACHER_MODEL"
 fi
 
@@ -92,11 +94,11 @@ echo ""
 echo "========================================"
 echo "STEP 2: Combine SFT data"
 echo "========================================"
-combine_if_exists synthetic_qa_combined.jsonl \
-  synthetic_qa_seed.jsonl \
-  synthetic_qa_auto.jsonl
+combine_if_exists training_data/sft/synthetic_qa_combined.jsonl \
+  training_data/sft/synthetic_qa_seed.jsonl \
+  training_data/sft/synthetic_qa_auto.jsonl
 
-python scripts/audit_training_data.py synthetic_qa_combined.jsonl
+python scripts/audit_training_data.py training_data/sft/synthetic_qa_combined.jsonl
 
 if [[ "$SKIP_SFT" -eq 0 ]]; then
   echo ""
@@ -104,7 +106,7 @@ if [[ "$SKIP_SFT" -eq 0 ]]; then
   echo "STEP 3: Dry-run SFT formatting"
   echo "========================================"
   python model/finetune.py \
-    --data synthetic_qa_combined.jsonl \
+    --data training_data/sft/synthetic_qa_combined.jsonl \
     --model "$SFT_BASE_MODEL" \
     --out results_sft \
     --dry-run \
@@ -115,7 +117,7 @@ if [[ "$SKIP_SFT" -eq 0 ]]; then
   echo "STEP 4: SFT fine-tuning"
   echo "========================================"
   python model/finetune.py \
-    --data synthetic_qa_combined.jsonl \
+    --data training_data/sft/synthetic_qa_combined.jsonl \
     --model "$SFT_BASE_MODEL" \
     --out results_sft \
     --epochs 3 \
@@ -136,7 +138,7 @@ if [[ "$SKIP_EVAL" -eq 0 ]]; then
     --repo "$REPO" \
     --model "$OLLAMA_BASE_MODEL" \
     --benchmark eval/benchmark_self.json \
-    --out eval_report_post_codefix_or_base.json \
+    --out evaluation_reports/eval_report_post_codefix_or_base.json \
     --verbose || true
 fi
 
@@ -153,8 +155,8 @@ if [[ "$SKIP_DPO" -eq 0 ]]; then
   fi
 
   python data/pref_gen.py \
-    --input synthetic_qa_combined.jsonl \
-    --output preference_data_auto.jsonl \
+    --input training_data/sft/synthetic_qa_combined.jsonl \
+    --output training_data/preferences/preference_data_auto.jsonl \
     --model "$TEACHER_MODEL" \
     --judge "$TEACHER_MODEL" \
     "${STUDENT_ARG[@]}"
@@ -164,17 +166,17 @@ if [[ "$SKIP_DPO" -eq 0 ]]; then
   echo "STEP 7: Generate failure-driven DPO rows from eval reports"
   echo "========================================"
 
-  if [[ -f eval_report_base.json ]]; then
+  if [[ -f evaluation_reports/eval_report_base.json ]]; then
     python data/failure_dpo_from_eval.py \
-      --report eval_report_base.json \
-      --out preference_data_failures_base.jsonl \
+      --report evaluation_reports/eval_report_base.json \
+      --out training_data/preferences/preference_data_failures_base.jsonl \
       --threshold 0.75
   fi
 
-  if [[ -f eval_report_post_codefix_or_base.json ]]; then
+  if [[ -f evaluation_reports/eval_report_post_codefix_or_base.json ]]; then
     python data/failure_dpo_from_eval.py \
-      --report eval_report_post_codefix_or_base.json \
-      --out preference_data_failures_post.jsonl \
+      --report evaluation_reports/eval_report_post_codefix_or_base.json \
+      --out training_data/preferences/preference_data_failures_post.jsonl \
       --threshold 0.75
   fi
 
@@ -182,19 +184,20 @@ if [[ "$SKIP_DPO" -eq 0 ]]; then
   echo "========================================"
   echo "STEP 8: Combine preference data"
   echo "========================================"
-  combine_if_exists preference_data_combined.jsonl \
-    preference_data_auto.jsonl \
-    preference_data_failures_base.jsonl \
-    preference_data_failures_post.jsonl \
-    preference_data_failures_unseen_v2.jsonl
+  combine_if_exists training_data/preferences/preference_data_combined.jsonl \
+    training_data/preferences/preference_data_auto.jsonl \
+    training_data/preferences/preference_data_failures_base.jsonl \
+    training_data/preferences/preference_data_failures_post.jsonl \
+    training_data/preferences/preference_data_failures_unseen_v2.jsonl \
+    training_data/preferences/preference_data_rlhf.jsonl
 
-  python scripts/audit_training_data.py preference_data_combined.jsonl
+  python scripts/audit_training_data.py training_data/preferences/preference_data_combined.jsonl
 
   echo ""
   echo "========================================"
   echo "STEP 8b: Validate combined DPO data"
   echo "========================================"
-  python scripts/validate_dpo.py preference_data_combined.jsonl
+  python scripts/validate_dpo.py training_data/preferences/preference_data_combined.jsonl
 
   echo ""
   echo "========================================"
@@ -207,7 +210,7 @@ if [[ "$SKIP_DPO" -eq 0 ]]; then
   fi
 
   python model/dpo.py \
-    --dpo-data-path preference_data_combined.jsonl \
+    --dpo-data-path training_data/preferences/preference_data_combined.jsonl \
     --out results_dpo \
     --sft-adapter results_sft/adapter \
     --max-steps 200
@@ -218,12 +221,12 @@ echo "========================================"
 echo "DONE"
 echo "========================================"
 
-if [[ -f eval_report_base.json ]]; then
+if [[ -f evaluation_reports/eval_report_base.json ]]; then
   python - <<'PY'
 import json
 from pathlib import Path
 
-for path in ["eval_report_base.json", "eval_report_post_codefix_or_base.json"]:
+for path in ["evaluation_reports/eval_report_base.json", "evaluation_reports/eval_report_post_codefix_or_base.json"]:
     p = Path(path)
     if not p.exists():
         continue
@@ -237,4 +240,4 @@ echo ""
 echo "Important next step:"
 echo "results_sft/adapter and results_dpo/adapter are LoRA adapters."
 echo "Ollama eval will not reflect them until you export/merge/serve the adapter as an actual model."
-echo "Do not interpret eval_report_post_codefix_or_base.json as fine-tuned-model performance unless '$OLLAMA_BASE_MODEL' points to an exported fine-tuned model."
+echo "Do not interpret evaluation_reports/eval_report_post_codefix_or_base.json as fine-tuned-model performance unless '$OLLAMA_BASE_MODEL' points to an exported fine-tuned model."

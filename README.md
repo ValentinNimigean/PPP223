@@ -90,13 +90,20 @@ Self-repo benchmarks are useful for fast iteration, but can suffer from contamin
 
 ### Command Examples
 
+> [!TIP]
+> You can override the default Ollama model to use a custom model (e.g. the smaller `qwen2.5-coder:1.5b`) by exporting the `OLLAMA_MODEL` environment variable:
+> * Bash: `export OLLAMA_MODEL=qwen2.5-coder:1.5b`
+> * PowerShell: `$env:OLLAMA_MODEL="qwen2.5-coder:1.5b"`
+>
+> You can also specify the model explicitly using the `--model` CLI argument.
+
 **1. Run Demo-mode evaluation (Self-repo):**
 ```bash
 python eval/eval.py \
   --repo . \
   --model qwen2.5-coder:3b \
   --benchmark eval/benchmark_self.json \
-  --out eval_report_demo.json
+  --out evaluation_reports/eval_report_demo.json
 ```
 
 **2. Run Honest-mode evaluation (Self-repo):**
@@ -105,7 +112,7 @@ python eval/eval.py \
   --repo . \
   --model qwen2.5-coder:3b \
   --benchmark eval/benchmark_self.json \
-  --out eval_report_honest.json \
+  --out evaluation_reports/eval_report_honest.json \
   --disable-deterministic-shortcuts
 ```
 

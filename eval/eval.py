@@ -117,8 +117,8 @@ def score_response(response: str, expected_entities: List[str], expected_files: 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate Agent Performance")
     parser.add_argument("--repo", default=".", help="Repo path to index")
-    parser.add_argument("--model", default="qwen2.5-coder:3b", help="Ollama model name")
-    parser.add_argument("--out", default="eval_report.json", help="Output JSON report path")
+    parser.add_argument("--model", default=os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b"), help="Ollama model name")
+    parser.add_argument("--out", default="evaluation_reports/eval_report.json", help="Output JSON report path")
     parser.add_argument("--verbose", action="store_true", help="Print detailed results")
     parser.add_argument("--benchmark", default=None, help="Path to a JSON benchmark file. Defaults to the built-in self-benchmark.")
     parser.add_argument("--disable-deterministic-shortcuts", action="store_true", help="Disable deterministic early shortcuts and templates for honest evaluation.")

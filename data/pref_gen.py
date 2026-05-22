@@ -20,13 +20,13 @@ except ImportError:
 def get_cli_args():
     parser = argparse.ArgumentParser(description="Generate DPO preference data for RLHF.")
     parser.add_argument("--input", required=True, help="Path to synthetic_qa.jsonl")
-    parser.add_argument("--output", default="preference_data.jsonl", help="Path to preference_data.jsonl")
+    parser.add_argument("--output", default="training_data/preferences/preference_data_auto.jsonl", help="Path to preference_data.jsonl")
     parser.add_argument("--model", default="gpt-4o", help="Teacher model")
     parser.add_argument("--judge", default="gpt-4o", help="Judge model")
     parser.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI-compatible base URL")
     parser.add_argument("--limit", type=int, help="Max rows to process")
     parser.add_argument("--student-url", default=None, help="Base URL of a local SFT model (e.g. http://localhost:11434/v1). If set, one candidate is drawn from this model instead of the teacher.")
-    parser.add_argument("--student-model", default="qwen2.5-coder:3b", help="Model name to use at --student-url")
+    parser.add_argument("--student-model", default=os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b"), help="Model name to use at --student-url")
     return parser.parse_args()
 
 def load_existing_prompts(output_path: str) -> set:
@@ -78,6 +78,10 @@ def main():
     if not os.path.exists(args.input):
         print(f"Error: Input file {args.input} not found.")
         sys.exit(1)
+        
+    out_dir = os.path.dirname(args.output)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
         
     with open(args.input, "r", encoding="utf-8") as f_in, \
          open(args.output, "a", encoding="utf-8") as f_out:

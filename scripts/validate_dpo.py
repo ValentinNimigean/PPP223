@@ -128,7 +128,7 @@ def validate_row(row: Dict[str, Any]) -> Tuple[List[str], List[str]]:
 
 
 def main() -> None:
-    path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("preference_data_combined.jsonl")
+    path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("training_data/preferences/preference_data_combined.jsonl")
 
     rows, load_errors = load_jsonl(path)
     errors: List[str] = list(load_errors)

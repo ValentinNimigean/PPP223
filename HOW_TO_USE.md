@@ -38,7 +38,7 @@ pip install -r requirements-train-local.txt
 
 ## 4. Start the local model
 
-This project is designed to run locally using Ollama. Pull and launch the primary model (`qwen2.5-coder:3b`):
+This project is designed to run locally using Ollama. Pull and launch the default model (`qwen2.5-coder:3b`):
 ```bash
 ollama pull qwen2.5-coder:3b
 ollama run qwen2.5-coder:3b
@@ -48,6 +48,12 @@ Ollama must be running and accessible at:
 ```
 http://localhost:11434
 ```
+
+> [!TIP]
+> If you have resources constraints or want to run a smaller model locally (e.g. `qwen2.5-coder:1.5b`), you can configure the agent to use it by setting the `OLLAMA_MODEL` environment variable before running scripts or booting Streamlit:
+> * PowerShell: `$env:OLLAMA_MODEL="qwen2.5-coder:1.5b"`
+> * Bash: `export OLLAMA_MODEL=qwen2.5-coder:1.5b`
+> * Or simply change the model name directly in the sidebar input box in the Streamlit UI.
 
 ## 5. Run a one-shot question
 
@@ -83,6 +89,11 @@ streamlit run ui/app.py
 1. Open the localhost URL printed in the terminal (usually `http://localhost:8501`).
 2. Set the target local repository path in the sidebar (default is `.`).
 3. Enter your queries in the chat input at the bottom of the page.
+4. **Collect RLHF/DPO Preference Feedback:** Under each assistant response, you can click **👍 Like** or **👎 Correction**.
+   * Clicking **👍 Like** logs the response as a positive/chosen sample in the preference dataset.
+   * Clicking **👎 Correction** opens an input form where you can provide the correct/preferred response. Submitting it saves the correction as the `chosen` response and the original agent output as the `rejected` response.
+   * All feedbacks are automatically appended to `training_data/preferences/preference_data_rlhf.jsonl` in the active repository directory, allowing you to feed human feedback directly into the DPO alignment pipeline (see Section 12).
+
 
 ### Recommended example questions to ask:
 * *What class handles hybrid vector search?*
@@ -146,7 +157,7 @@ python eval/eval.py \
   --repo . \
   --model qwen2.5-coder:3b \
   --benchmark eval/benchmark_self.json \
-  --out eval_report_demo.json \
+  --out evaluation_reports/eval_report_demo.json \
   --verbose
 ```
 
@@ -156,7 +167,7 @@ python eval/eval.py \
   --repo . \
   --model qwen2.5-coder:3b \
   --benchmark eval/benchmark_self.json \
-  --out eval_report_honest.json \
+  --out evaluation_reports/eval_report_honest.json \
   --disable-deterministic-shortcuts \
   --verbose
 ```
@@ -177,7 +188,7 @@ python eval/eval.py \
   --repo ../httpx \
   --model qwen2.5-coder:3b \
   --benchmark eval/benchmark_httpx.json \
-  --out eval_report_httpx_honest.json \
+  --out evaluation_reports/eval_report_httpx_honest.json \
   --disable-deterministic-shortcuts \
   --verbose
 ```
@@ -194,12 +205,12 @@ The codebase includes full support for parameter-efficient fine-tuning (PEFT) us
 1. **Build the seed dataset and combine synthetic Q&A data:**
    ```bash
    python build_seed_dataset.py
-   cp synthetic_qa_seed.jsonl synthetic_qa_combined.jsonl
+   cp training_data/sft/synthetic_qa_seed.jsonl training_data/sft/synthetic_qa_combined.jsonl
    ```
 
 2. **Audit dataset files to ensure strict data hygiene:**
    ```bash
-   python scripts/audit_training_data.py synthetic_qa_combined.jsonl
+   python scripts/audit_training_data.py training_data/sft/synthetic_qa_combined.jsonl
    ```
 
 3. **Generate the 2048-safe dataset filter:**
@@ -209,8 +220,8 @@ The codebase includes full support for parameter-efficient fine-tuning (PEFT) us
    from pathlib import Path
    from transformers import AutoTokenizer
 
-   src = Path("synthetic_qa_combined.jsonl")
-   dst = Path("synthetic_qa_combined_2048.jsonl")
+   src = Path("training_data/sft/synthetic_qa_combined.jsonl")
+   dst = Path("training_data/sft/synthetic_qa_combined_2048.jsonl")
    tok = AutoTokenizer.from_pretrained("unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit")
 
    kept = dropped = 0
@@ -239,7 +250,7 @@ The codebase includes full support for parameter-efficient fine-tuning (PEFT) us
 4. **Execute a dry-run token audit to verify training constraints:**
    ```bash
    python model/finetune.py \
-     --data synthetic_qa_combined_2048.jsonl \
+     --data training_data/sft/synthetic_qa_combined_2048.jsonl \
      --model unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit \
      --out results_sft \
      --dry-run \
@@ -250,7 +261,7 @@ The codebase includes full support for parameter-efficient fine-tuning (PEFT) us
    ```bash
    PYTORCH_ALLOC_CONF=expandable_segments:True \
    python model/finetune.py \
-     --data synthetic_qa_combined_2048.jsonl \
+     --data training_data/synthetic_qa_combined_2048.jsonl \
      --model unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit \
      --out results_sft \
      --epochs 3 \
@@ -277,18 +288,36 @@ To minimize toxic reflexes, hallucinations, and vague responses, the codebase su
 * **Pre-requisite:** DPO must be run *after* completing the SFT adapter step.
 * **Important Safety Rule:** You must validate preference data before training to ensure there is no data contamination.
 
-### Running DPO:
+### The RLHF Feedback & Collection Flow:
+1. **Interactive Feedback in UI:** Under each assistant response in the Streamlit interface, you can click **👍 Like** or **👎 Correction**.
+   * **Like**: Appends a preference row to `training_data/preferences/preference_data_rlhf.jsonl` marking the assistant's response as the `chosen` output.
+   * **Correction**: Displays a form allowing you to type the correct or preferred response. Submitting it logs your typed response as `chosen` and the original agent output as `rejected` in `training_data/preferences/preference_data_rlhf.jsonl`.
+2. **Data Preservation**: Human feedback is written to the standalone file `training_data/preferences/preference_data_rlhf.jsonl`. This isolates manual human annotations and prevents them from being accidentally overwritten or deleted when automated SFT/DPO runs clean and rebuild synthetic datasets.
+3. **Pipeline Merging**: When you run the training pipeline (`bash scripts/train_pipeline.sh` on Bash or `.\scripts\train_pipeline.ps1` in PowerShell), Step 8 automatically merges `training_data/preferences/preference_data_rlhf.jsonl` along with all other preference datasets (e.g., failure-driven DPO rows and auto-generated SFT outputs) into a unified `training_data/preferences/preference_data_combined.jsonl`.
+
+### Running the Automated Training Pipeline:
+You can run SFT, SFT evaluations, preference compilation, validation checks, and DPO alignment sequentially using the unified pipeline script:
+* **Linux/macOS (Bash):**
+  ```bash
+  bash scripts/train_pipeline.sh
+  ```
+* **Windows (PowerShell):**
+  ```powershell
+  .\scripts\train_pipeline.ps1
+  ```
+
+### Running DPO Manually:
 
 1. **Validate the preference dataset:**
    ```bash
-   python scripts/validate_dpo.py preference_data_combined.jsonl
+   python scripts/validate_dpo.py training_data/preferences/preference_data_combined.jsonl
    ```
 
 2. **Launch DPO training:**
    ```bash
    python model/dpo.py \
      --model Qwen/Qwen2.5-Coder-1.5B-Instruct \
-     --dpo-data-path preference_data_combined.jsonl \
+     --dpo-data-path training_data/preferences/preference_data_combined.jsonl \
      --out results_dpo \
      --sft-adapter results_sft/adapter \
      --max-steps 200
@@ -297,17 +326,28 @@ To minimize toxic reflexes, hallucinations, and vague responses, the codebase su
 * The alignment process will output the trained DPO adapter to `results_dpo/adapter`.
 * If validation checks fail, do not start training. You must inspect and fix the preference dataset beforehand.
 
-## 13. Data hygiene checks
+## 13. Data hygiene and validation checks (The "Clean" Script)
 
-Data hygiene scripts keep toxic or hallucinated artifacts from contaminating your model. It is critical to execute these checks before running SFT or DPO processes:
+Data hygiene scripts keep toxic or contaminated artifacts from entering SFT/DPO training. Always run these checks before training:
 ```bash
-python scripts/audit_training_data.py synthetic_qa_seed.jsonl synthetic_qa_combined.jsonl synthetic_qa_combined_2048.jsonl
-python scripts/validate_dpo.py preference_data_combined.jsonl
+python scripts/audit_training_data.py training_data/sft/synthetic_qa_seed.jsonl training_data/sft/synthetic_qa_combined.jsonl
+python scripts/validate_dpo.py training_data/preferences/preference_data_combined.jsonl
 ```
 
-### Purpose of Hygiene Scripts:
-* `audit_training_data.py`: Automatically scans training datasets, rejecting any files that contain absolute local paths (e.g., `/home/...`), `file://` URLs, or toxic/contaminated terms. Rejections exit with a code `1` to stop downstream automation pipelines.
-* `validate_dpo.py`: Ensures preference data pairs are aligned properly, weeding out corrupt labels, toxic prompt anomalies, and vague chosen/rejected text constructs.
+### How the validation/clean scripts work:
+
+#### 1. DPO Validation (`scripts/validate_dpo.py`)
+This script audits preference datasets to ensure high-quality DPO training. It executes the following checks on every row:
+* **Schema Integrity**: Verifies that the required keys (`prompt`, `chosen`, `rejected`) are present and non-empty.
+* **Divergence**: Ensures that the `chosen` text is not identical to the `rejected` text.
+* **Contamination Filtering**: Rejects rows where the `chosen` answer contains codebase leakage terms (e.g. references to nonexistent `generate_preferences` calls, system framework keywords, or local file system structures).
+* **Vague Phrase Filtering**: Blocks chosen responses containing generic filler text such as `The answer is` to enforce professional output formatting.
+* **False Refusal Detection**: Ensures that non-toxic questions do not mistakenly trigger toxic-refusal template responses (e.g. "I cannot process this abusive request") in the chosen response.
+* **Required File Citations**: Cross-references metadata to verify that any code files marked as expected are actually cited in the chosen response.
+* **Pipeline Block**: If any fatal violations are detected, the script outputs error details and exits with code `1`, halting automated training pipelines to protect model weights.
+
+#### 2. SFT/General Auditing (`scripts/audit_training_data.py`)
+* Automatically scans training datasets, rejecting any files containing absolute local paths (e.g., `/home/...`, `/Users/...`, `C:\`, `Documents/GitHub`), `file://` URLs, or toxic terms. This prevents the model from memorizing the host machine's directory paths.
 
 ## 14. Troubleshooting
 
@@ -321,7 +361,7 @@ If you see an error warning that the local Ollama backend is not accessible:
 
 ### CUDA out of memory during fine-tuning
 If fine-tuning crashes with an Out-of-Memory (OOM) error:
-1. Ensure you are using the pre-filtered `synthetic_qa_combined_2048.jsonl` dataset.
+1. Ensure you are using the pre-filtered `training_data/sft/synthetic_qa_combined_2048.jsonl` dataset.
 2. Reduce the sequence length and gradient accumulation.
 3. Lower the LoRA rank/alpha parameters.
 
@@ -329,7 +369,7 @@ Use this optimized, low-memory fallback configuration:
 ```bash
 PYTORCH_ALLOC_CONF=expandable_segments:True \
 python model/finetune.py \
-  --data synthetic_qa_combined_2048.jsonl \
+  --data training_data/sft/synthetic_qa_combined_2048.jsonl \
   --model unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit \
   --out results_sft \
   --epochs 3 \
@@ -345,6 +385,15 @@ python model/finetune.py \
 ### Qdrant / vector search issue
 If the vector index throws errors or is slow:
 * The codebase handles failures gracefully. The agent retriever will fall back automatically to standard exact string/lexical search, maintaining functional performance without vector indices.
+
+### Running Offline / Local Caching of Embedding Models
+If your environment lacks internet access, or you want to prevent network connection attempts to Hugging Face Hub during start-up, you can pre-download the models:
+1. Run the download helper script:
+   ```bash
+   python scripts/download_models.py
+   ```
+2. This script downloads the dense and sparse models directly into a local `.fastembed_cache` folder in the repository root.
+3. The retriever automatically detects this directory at start-up and loads the models locally in offline mode (`local_files_only=True`).
 
 ### Hallucination warnings look noisy
 If you notice frequent hallucination warning banners in the UI:

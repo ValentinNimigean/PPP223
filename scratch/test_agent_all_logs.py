@@ -33,7 +33,7 @@ repo_map = RepoMapGenerator().generate_map(chunks)
 retriever = HybridRetriever()
 retriever.ingest_chunks(chunks)
 
-agent = SLMAgent(repo_map_string=repo_map, model="qwen2.5-coder:3b")
+agent = SLMAgent(repo_map_string=repo_map, model=os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b"))
 agent.set_retriever(retriever)
 
 question = "What class handles hybrid vector search?"

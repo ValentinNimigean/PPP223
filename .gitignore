@@ -34,6 +34,8 @@ env/
 ENV/
 env.bak/
 venv.bak/
+.venv_*/
+venv_*/
 
 # Environment Variables
 .env
@@ -58,6 +60,20 @@ coverage.xml
 .pytest_cache/
 pytestdebug.log
 
-# Project specific
+# Project specific / ML models cache
 qdrant_storage/
 fastembed_cache/
+.fastembed_cache/
+unsloth_compiled_cache/
+
+# Training adapters and outputs
+results_sft/
+results_dpo/
+
+# Evaluation reports
+evaluation_reports/*
+
+# Generated and collected preference/QA datasets
+training_data/sft/*
+!training_data/sft/synthetic_qa_seed.jsonl
+training_data/preferences/*

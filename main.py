@@ -12,6 +12,7 @@ def main():
     logging.basicConfig(level=logging.DEBUG, format="%(name)s | %(message)s")
     parser = argparse.ArgumentParser(description="SLM Agent Demo")
     parser.add_argument("--repo", default=".", help="Path to the Python repo to analyze.")
+    parser.add_argument("--model", default=os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b"), help="Ollama model name to use.")
     parser.add_argument("--question", default="What tool functions are available in the repository? Please grep for def grep_search.", help="Question for the agent.")
     parser.add_argument("--disable-deterministic-shortcuts", action="store_true", help="Disable deterministic early shortcuts and templates.")
     args = parser.parse_args()
@@ -33,9 +34,10 @@ def main():
     retriever.ingest_chunks(chunks)
     
     # --- PHASE 2 ---
-    print("\n[PHASE 2] Initializing SLM Agent (Connecting to local Ollama)...")
+    print(f"\n[PHASE 2] Initializing SLM Agent ({args.model} via local Ollama)...")
     agent = SLMAgent(
         repo_map_string=repo_map_string,
+        model=args.model,
         enable_deterministic_shortcuts=not args.disable_deterministic_shortcuts,
         enable_tool_result_templates=not args.disable_deterministic_shortcuts,
     )

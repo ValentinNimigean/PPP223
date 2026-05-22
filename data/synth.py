@@ -107,7 +107,7 @@ def generate_synthetic_data(repo_root: str, output_file: str, model: str = "gpt-
         print(f"Failed to initialize OpenAI client: {e}. Ensure OPENAI_API_KEY is set.")
         return
         
-    seed_path = os.path.join(os.path.dirname(__file__), "..", "synthetic_qa_seed.jsonl")
+    seed_path = os.path.join(os.path.dirname(__file__), "..", "training_data", "sft", "synthetic_qa_seed.jsonl")
     few_shot_examples = ""
     if os.path.exists(seed_path):
         with open(seed_path, "r", encoding="utf-8") as sf:
@@ -209,7 +209,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", default=".")
-    parser.add_argument("--out", default="synthetic_qa.jsonl")
+    parser.add_argument("--out", default="training_data/sft/synthetic_qa_auto.jsonl")
     parser.add_argument("--model", default="gpt-4o", help="Teacher LLM model name.")
     parser.add_argument("--examples-per-chunk", type=int, default=2)
     parser.add_argument("--max-chunks", type=int, default=None)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -20,7 +21,7 @@ class SLMAgent:
         self,
         repo_map_string: str = "",
         base_url: str = "http://localhost:11434/v1",
-        model: str = "qwen2.5-coder:3b",
+        model: str = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b"),
         hallucination_check: bool = False,
         enable_deterministic_shortcuts: bool = True,
         enable_tool_result_templates: bool = True,
