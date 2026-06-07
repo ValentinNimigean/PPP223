@@ -335,8 +335,10 @@ class HybridRetriever:
             for doc, meta in list(zip(self._documents, self._metadata))[:limit]
         ]
 
-    def search(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
-        query = query or ""
+    def search(self, query: str | Dict[str, Any], limit: int = 5) -> List[Dict[str, Any]]:
+        if isinstance(query, dict):
+            query = query.get("query", "") or query.get("pattern", "") or str(query)
+        query = str(query or "")
         limit = max(int(limit or 5), 1)
 
         if self.qdrant_ready:

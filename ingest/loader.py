@@ -1,6 +1,6 @@
 import os
 from typing import List
-from ingest.chunker import ASTChunker
+from ingest.chunker import ASTChunker, LineChunker, CharacterChunker
 from ingest.metadata import CodeChunk
 
 class Loader:
@@ -21,9 +21,18 @@ class Loader:
         "dist"
     })
 
-    def __init__(self, root_dir: str):
+    def __init__(self, root_dir: str, chunker_type: str = "ast"):
         self.root_dir = os.path.abspath(root_dir)
-        self.chunker = ASTChunker()
+        self.chunker_type = chunker_type.lower()
+        if self.chunker_type == "ast":
+            self.chunker = ASTChunker()
+        elif self.chunker_type == "line":
+            self.chunker = LineChunker()
+        elif self.chunker_type == "char":
+            self.chunker = CharacterChunker()
+        else:
+            raise ValueError(f"Unknown chunker_type: {chunker_type}")
+
 
     def process_directory(self) -> List[CodeChunk]:
         """
