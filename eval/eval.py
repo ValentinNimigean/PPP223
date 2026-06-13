@@ -122,6 +122,7 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="Print detailed results")
     parser.add_argument("--benchmark", default=None, help="Path to a JSON benchmark file. Defaults to the built-in self-benchmark.")
     parser.add_argument("--disable-deterministic-shortcuts", action="store_true", help="Disable deterministic early shortcuts and templates for honest evaluation.")
+    parser.add_argument("--chunker", default="ast", choices=["ast", "line", "char"], help="Chunking strategy to use (ast, line, or char)")
     args = parser.parse_args()
 
     if args.benchmark:
@@ -144,17 +145,31 @@ def main():
 
     repo_path = os.path.abspath(args.repo)
     
-    print(f"--- Starting Evaluation on {repo_path} using model {args.model} ---")
+    print(f"--- Starting Evaluation on {repo_path} using model {args.model} (chunker: {args.chunker}) ---")
     
-    # Boot sequence
+    # Boot sequence with timing
+    import time
     print("[1/3] Scanning codebase...")
-    loader = Loader(repo_path)
+    t0_ingest = time.perf_counter()
+    loader = Loader(repo_path, chunker_type=args.chunker)
     chunks = loader.process_directory()
     repo_map = RepoMapGenerator().generate_map(chunks)
     
     print(f"[2/3] Ingesting {len(chunks)} chunks...")
     retriever = HybridRetriever()
     retriever.ingest_chunks(chunks)
+    ingest_time = time.perf_counter() - t0_ingest
+    print(f"Ingestion/indexing completed in {ingest_time:.3f} seconds.")
+    
+    # Wrap retriever search to measure search latency
+    retrieval_latencies = []
+    original_search = retriever.search
+    def timed_search(*search_args, **search_kwargs):
+        t0_search = time.perf_counter()
+        search_res = original_search(*search_args, **search_kwargs)
+        retrieval_latencies.append(time.perf_counter() - t0_search)
+        return search_res
+    retriever.search = timed_search
     
     print(f"[3/3] Initializing agent...")
     agent = SLMAgent(
@@ -172,6 +187,7 @@ def main():
     total_penalized_score = 0.0
 
     print("\n--- Running Benchmark ---")
+    t0_benchmark = time.perf_counter()
     for i, item in enumerate(benchmark, 1):
         question = item["question"]
         expected_entities = item["expected_entities"]
@@ -210,12 +226,19 @@ def main():
             print("-" * 40)
 
     num_q = len(benchmark)
+    avg_retrieval_latency = sum(retrieval_latencies) / len(retrieval_latencies) if retrieval_latencies else 0.0
+    total_eval_time = time.perf_counter() - t0_benchmark
+
     report = {
         "model": args.model,
         "repo": repo_path,
         "timestamp": datetime.now().isoformat(),
+        "chunker": args.chunker,
         "deterministic_shortcuts_enabled": not args.disable_deterministic_shortcuts,
         "tool_result_templates_enabled": not args.disable_deterministic_shortcuts,
+        "ingest_time_seconds": ingest_time,
+        "average_retrieval_latency_seconds": avg_retrieval_latency,
+        "total_eval_time_seconds": total_eval_time,
         "overall": {
             "entity_score": total_entity_score / num_q,
             "file_score": total_file_score / num_q,
@@ -226,17 +249,24 @@ def main():
         "results": results
     }
 
+    # Ensure output directory exists
+    out_dir = os.path.dirname(os.path.abspath(args.out))
+    os.makedirs(out_dir, exist_ok=True)
+
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2)
 
-    print("\n" + "─" * 41)
+    print("\n" + "-" * 41)
     for i, res in enumerate(results, 1):
-        print(f"Q{i}: {res['combined_score']:.2f} — {res['question']}")
+        print(f"Q{i}: {res['combined_score']:.2f} - {res['question']}")
     
-    print("─" * 41)
+    print("-" * 41)
     print(f"Overall combined score: {report['overall']['combined_score']:.2f} / 1.00")
     print(f"Penalized combined score (hallucination-adjusted): {report['overall']['penalized_combined_score']:.2f} / 1.00")
+    print(f"Chunking/Ingestion Time: {ingest_time:.3f} s")
+    print(f"Average Retrieval Latency: {avg_retrieval_latency:.4f} s")
     print(f"Report saved to {args.out}")
 
 if __name__ == "__main__":
     main()
+

@@ -245,6 +245,8 @@ class SLMAgent:
         try:
             if name == "grep_search":
                 pattern = args.get("pattern", "")
+                if isinstance(pattern, dict):
+                    pattern = pattern.get("pattern", "") or pattern.get("query", "") or str(pattern)
                 if not pattern or not str(pattern).strip():
                     return "Invalid grep_search call: pattern is required."
                 return AgentTools.grep_search(
@@ -254,6 +256,8 @@ class SLMAgent:
 
             if name == "semantic_search":
                 query = args.get("query", "")
+                if isinstance(query, dict):
+                    query = query.get("query", "") or query.get("pattern", "") or str(query)
                 if not query or not str(query).strip():
                     return "Invalid semantic_search call: query is required."
                 if not self.retriever:
