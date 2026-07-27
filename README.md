@@ -1,103 +1,150 @@
-# PPP223
-# Python Code Understanding SLM Agent
+# PPP223: Python Code Understanding SLM Agent
 
-
-# Team Mobtrap
-
-# Members
+Developed by **Team Mobtrap**:
 * Nimigean Valentin
 * Balog David
 * Soptelea Sebastian
 * Szarics Iulia
 
-For setup, demo commands, evaluation, and fine-tuning instructions, see [HOW_TO_USE.md](HOW_TO_USE.md).
-
-## Overview
-This project focuses on building a Small Language Model (SLM) agent designed for deep Python code understanding. The core objective is to move beyond simple text-matching to create a system that understands the hierarchical nature of Python.
-
+For quick-start setup, demo commands, fine-tuning scripts, and environment configuration, refer to [HOW_TO_USE.md](HOW_TO_USE.md).
 
 ---
 
-## Installation
+## 🌟 Overview
+
+This repository houses an agentic, Small Language Model (SLM)-based assistant designed for deep Python code understanding. Moving beyond simple text/character-count matching, the system extracts code semantics and structural hierarchies using Abstract Syntax Trees (AST). It generates an interactive codebase map, retrieves relevant contexts via a hybrid dense-sparse vector database, and uses an agentic loop equipped with file-system search tools to explore, reason, and accurately answer user queries.
+
+---
+
+## 📂 Repository Structure
+
+Below is an overview of the directories and primary files in the workspace:
+
+```
+├── data/                           # Codebase logic analysis and synthetic data tools
+│   ├── dep_graph.py                # Analyzes imports and calls to build a Python dependency graph
+│   ├── synth.py                    # Generates synthetic Q&A reasoning pairs based on the dependency graph
+│   ├── pref_gen.py                 # Compiles preference pairs (chosen/rejected) for DPO alignment
+│   └── failure_dpo_from_eval.py    # Extracts and prepares failed evaluation samples for DPO training
+│
+├── eval/                           # Codebase evaluation and validation modules
+│   ├── eval.py                     # Primary benchmark evaluator running questions against the agent
+│   ├── hallucination.py            # HallucinationDetector checking responses against ingested files/symbols
+│   ├── toxicity.py                 # ToxicityDetector filtering toxic or abusive inputs
+│   ├── run_comparison.py           # Compares performance metrics across model configurations
+│   ├── benchmark_self.json         # Self-repo evaluation dataset
+│   ├── benchmark_httpx.json        # External validation dataset for the encode/httpx repository
+│   └── benchmark_unseen_self.json  # Additional unseen self-eval questions
+│
+├── ingest/                         # Codebase scanning and processing pipeline
+│   ├── chunker.py                  # Structural parsing of Python files into AST chunks (classes, methods, functions)
+│   ├── loader.py                   # Recursive project crawler with directory filter and tree-sitter syntax fallback
+│   └── metadata.py                 # Defines the CodeChunk data model and metadata schemas
+│
+├── model/                          # Agentic loop, training pipelines, and local inference
+│   ├── agent.py                    # Main SLMAgent implementation handling tool orchestration and safety checks
+│   ├── tools.py                    # Implementation of agent tools (grep_search and semantic_search)
+│   ├── finetune.py                 # SFT training pipeline using Unsloth QLoRA
+│   ├── dpo.py                      # Direct Preference Optimization (DPO) alignment script
+│   └── inference.py                # Command-line utility to query models
+│
+├── rag/                            # Retrieval-Augmented Generation context builders
+│   ├── repo_map.py                 # Generates global repository maps summarizing file hierarchies and symbols
+│   └── retriever.py                # HybridRetriever implementing Qdrant vector search and lexical fallback
+│
+├── scripts/                        # Automation shell/PowerShell scripts
+│   ├── train_pipeline.sh / .ps1    # Automated SFT & DPO training and validation pipeline
+│   ├── run_eval_modes.sh           # Script running evaluations in Demo and Honest modes
+│   ├── eval_external_httpx.sh      # Clones and runs evaluation against the external httpx codebase
+│   ├── download_models.py          # Pre-downloads embedding models to local cache for offline execution
+│   ├── audit_training_data.py      # Checks dataset files for path leaks and contamination before training
+│   └── validate_dpo.py             # Validates DPO dataset structure, divergence, and citations
+│
+├── tests/                          # Unit and integration tests
+│   ├── test_agent_retriever.py     # Tests retriever functionality and agent paths
+│   └── test_hallucination_det.py   # Tests the hallucination detector rules
+│
+├── ui/                             # User interface applications
+│   ├── app.py                      # Streamlit-based web app with RLHF feedback loop (👍/👎 + correction)
+│   └── cli.py                      # Interactive loop-based command line assistant
+│
+├── main.py                         # Single-query entrypoint script
+├── requirements.txt                # Core dependency definitions
+├── requirements-train-local.txt    # Local training requirements (Unsloth + PyTorch)
+├── requirements-train.txt          # Server training requirements
+└── requirements-dev.txt            # Development and testing requirements (pytest, ruff)
+```
+
+---
+
+## 🛠️ Installation & Setup
 
 Choose the installation path that matches your use case:
 
-- **Dev/Demo (Runtime Only):**
-  ```bash
-  pip install -r requirements.txt
-  ```
-  *Note: Requires Ollama to be running locally for SLM inference.*
+### 1. Dev/Demo (Runtime Only)
+Installs the lightweight requirements to run the CLI, Streamlit UI, and local agent:
+```bash
+pip install -r requirements.txt
+```
+> [!NOTE]
+> Requires [Ollama](https://ollama.com) to be running locally with the target model (e.g. `qwen2.5-coder:3b`).
 
-- **Training (GPU Machine Only):**
-  ```bash
-  pip install -r requirements-train.txt
-  ```
-  *Note: Requires NVIDIA GPU with CUDA 12.1+. VRAM: 4-6GB (SFT), 6GB+ (DPO).*
+### 2. Training (GPU Machine Only)
+To run SFT fine-tuning or DPO alignment, install the GPU-compatible training environment:
+```bash
+pip install -r requirements-train-local.txt
+```
+> [!IMPORTANT]
+> Requires an NVIDIA GPU with CUDA 12.1+ and 6GB+ VRAM. Unsloth is compiled from source.
 
-- **Contributing (Development):**
-  ```bash
-  pip install -r requirements-dev.txt
-  ```
-
----
-
-## Architecture
-### 1. Dataset Selection: The Training Mixture 
-To ensure excellence in code reasoning, the agent utilizes a three-tier data strategy:
-* **High-Signal Code:** Leveraging The Stack v2 (Python Subset) for diverse repository exposure and CodeSearchNet for alignment between logic and natural language.
-* **Logic Benchmarking:** Integrating Human Eval and PyCode Bench during the SFT (Supervised Fine-Tuning) phase for logical consistency .
-* **Synthetic Reasoning:** Generating synthetic Q&A pairs from complex dependency graphs to teach the model how different repository files interact.
-
-### 2. Chunking Strategy: AST-Based Parsing
-We have moved away from character-count chunking in favor of Abstract Syntax Tree (AST) Chunking :
-* **Structural Integrity:** Code is split into logical blocks such as Classes, Methods, and Functions .
-* **Context Preservation:** Every chunk includes decorators, function signatures, and inheritance info to ensure the model maintains the "context" of a code snippet.
-
-### 3. Model & Vector Database Choices
-* **Primary Models:** Qwen2.5-Coder-3B as the primary model, 1.5B as the lightweight fallback
-* **Vector Storage:** Qdrant is selected for its advanced filtering capabilities, allowing for specific metadata queries (e.g., finding methods within a specific class).
-
-### 4. RAG Strategies
-The system experiments with two advanced retrieval methods:
-* **Repo Map Retrieval:** Providing a "bird's eye view" of the entire file structure before fetching specific code.
-* **Hybrid Search:** Combining Vector embeddings for semantic meaning with BM25 keyword search for finding specific variable or function names.
+### 3. Contributing & Testing
+To run tests and formatting checks:
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
 
 ---
 
-## Project Roadmap (Weeks 7-12)
+## 🧠 System Architecture
 
-### Phase 1: Sprinting Foundations (Weeks 7-8) 
-* **Week 7:** Implementing the AST parser and metadata attachment.
-* **Week 8:** Finalizing the "Repo Map" and hybrid retrieval logic in Qdrant.
+### 1. Dataset Selection & Synthetic Generation
+To optimize local SLM code reasoning, the repository compiles datasets from multiple source layers:
+* **Structural Synthesis:** Synthesizes QA pairs dynamically via `data/synth.py` by traversing codebase dependencies to build multi-file traversal questions.
+* **Alignment Tuning:** Refined using preference optimization datasets collected from UI corrections or generated programmatically via `data/pref_gen.py`.
 
-### Phase 2: Fine-Tuning & Logic (Weeks 9-10)
-* **Week 9:** Integrating the SLM and adding tool-calling capabilities (e.g., `grep`) to enable repository exploration.
-* **Week 10:** Performing QLORA fine-tuning on curated Python datasets to improve structured output.
+### 2. AST-Based Chunking
+Instead of traditional character-limit text splitting, `ingest/chunker.py` and `ingest/loader.py` apply structure-aware parsing:
+* **Symbol Extraction:** Divides Python source code by Classes, Methods, and Functions.
+* **Context Preservation:** Keeps relevant docstrings, function signatures, decorators, and base classes attached to each chunk.
+* **Syntax Fallback:** Automatically falls back to `tree-sitter-python` if standard AST parsing fails due to syntax errors.
 
-### Phase 3: Alignment & Deployment (Weeks 11-12)
-* **Week 11:** Using DPO (Direct Preference Optimization) to rank 500-1000 outputs, reducing hallucinations.
-* **Week 12:** Applying 4-bit model quantization for local speed and launching the Streamlit-based UI.
+### 3. Hybrid Retrieval & Resilient Fallback
+Implemented in `rag/retriever.py`:
+* **Dense & Sparse Vectors:** Combines `BAAI/bge-small-en-v1.5` embeddings for semantic intent and `Qdrant/bm25` for exact variable/keyword matches.
+* **Fusion Logic:** Utilizes Reciprocal Rank Fusion (RRF) to blend vector results.
+* **Lexical Fallback:** Gracefully falls back to pure TF-IDF/lexical search if Qdrant or system dependencies fail, ensuring uninterrupted agent execution.
+* **Offline Execution:** Supports offline caching via `scripts/download_models.py`, storing models in `.fastembed_cache`.
+
+### 4. Agentic Control Loop & Guardrails
+Orchestrated in `model/agent.py`:
+* **Tool Access:** Native functions like `grep_search` and `semantic_search` allow the model to actively query code.
+* **Toxicity Filter:** Rejects offensive prompts using `eval/toxicity.py`.
+* **Hallucination Detection:** Uses `eval/hallucination.py` to compare code identifiers and paths cited in the output against retrieved codebase context, issuing warning banners for unverified entities.
 
 ---
 
-## Evaluation modes
+## 📊 Evaluation Modes
 
-Self-repo benchmarks are useful for fast iteration, but can suffer from contamination because the agent's deterministic shortcuts and system prompts were developed around the repository structure itself. To ensure transparency, we distinguish between three evaluation modes:
+To benchmark and audit the agent without self-repo contamination, three evaluation modes are defined:
 
-* **Demo mode**: Uses deterministic guardrails and tool-result templates to make the user-facing application fast and reliable. This mode is the default and produces high stabilized scores, serving as a rapid capability demonstration rather than a pure measure of model generalization.
-* **Honest eval mode**: Disables all deterministic shortcuts and templates, measuring the pure RAG + LLM loop directly. The agent is forced to use actual tool-calling, reasoning, and retrieval.
-* **External-repo eval**: Evaluates the agent on a completely separate, unseen repository. This is the preferred method for judging true generalization capability.
+* **Demo mode**: Uses deterministic early-exit shortcuts and formatted templates. This mode yields high scores (e.g. ~0.92) and provides a fast, stable demonstration of capabilities.
+* **Honest mode**: Disables early shortcuts and templates, forcing the agent to use raw tool-calling, reasoning, and retrieval to resolve the query.
+* **External-repo mode**: Evaluates the agent against an entirely separate repository (such as `httpx`), testing the real-world generalization of the RAG system and model.
 
-### Command Examples
+### Quick Commands
 
-> [!TIP]
-> You can override the default Ollama model to use a custom model (e.g. the smaller `qwen2.5-coder:1.5b`) by exporting the `OLLAMA_MODEL` environment variable:
-> * Bash: `export OLLAMA_MODEL=qwen2.5-coder:1.5b`
-> * PowerShell: `$env:OLLAMA_MODEL="qwen2.5-coder:1.5b"`
->
-> You can also specify the model explicitly using the `--model` CLI argument.
-
-**1. Run Demo-mode evaluation (Self-repo):**
+**Run Demo-mode Evaluation (Self-repo):**
 ```bash
 python eval/eval.py \
   --repo . \
@@ -106,7 +153,7 @@ python eval/eval.py \
   --out evaluation_reports/eval_report_demo.json
 ```
 
-**2. Run Honest-mode evaluation (Self-repo):**
+**Run Honest-mode Evaluation (Self-repo):**
 ```bash
 python eval/eval.py \
   --repo . \
@@ -116,7 +163,7 @@ python eval/eval.py \
   --disable-deterministic-shortcuts
 ```
 
-**3. Run Honest External-repo evaluation (on httpx):**
+**Run External Evaluation (httpx):**
 ```bash
 git clone https://github.com/encode/httpx.git ../httpx
 bash scripts/eval_external_httpx.sh ../httpx qwen2.5-coder:3b
@@ -124,23 +171,12 @@ bash scripts/eval_external_httpx.sh ../httpx qwen2.5-coder:3b
 
 ---
 
-## Fine-tuned SLM
+## 🧹 Data Hygiene & Validation
 
-To optimize the agent for local inference and specialized Python code understanding, we perform fine-tuning:
+Ensuring high-quality inputs is essential before executing SFT or DPO. We run strict automated validation:
 
-* **Base model**: `unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit` (lightweight, instruct-aligned fallback).
-* **Method**: QLoRA parameter-efficient fine-tuning with **Unsloth** for 2x faster training and memory optimization.
-* **Adapter output**: Saved to `results_sft/adapter` (containing SFT LoRA adapters).
-* **Note on Inference**: The Streamlit UI currently uses the base Ollama model unless the SFT/DPO adapter is exported/merged, or served through an adapter-aware backend.
+* **Contamination Audit (`scripts/audit_training_data.py`)**: Automatically scans and rejects training files that contain local machine absolute paths (e.g., `file://`, `/Users/`, `/home/`), ensuring the agent does not memorize local setup environments.
+* **DPO Validation (`scripts/validate_dpo.py`)**: Checks preference files for schema validity, response divergence, fake refusal patterns, and correct symbol citations. Pipeline runs will automatically abort if errors are encountered.
 
----
-
-## Data hygiene
-
-To prevent training contamination and keep model reasoning high-quality, we enforce strict data hygiene checks prior to SFT/DPO training:
-
-* **Contamination Auditing (`scripts/audit_training_data.py`)**: A reusable script that parses JSONL files and automatically rejects the dataset (exiting with code `1`) if any line contains absolute local machine paths (e.g., `file://`, `/home/`, `/Users/`, `C:\`, `Documents/GitHub`) or contaminated terms (e.g., cloud SDK mentions, framework leaks).
-* **DPO Validation (`scripts/validate_dpo.py`)**: Ensures that chosen DPO candidate answers do not contain vague phrases or toxic prompt anomalies.
-* **Impact**: Absolute local paths are strictly rejected from training data to avoid teaching the model bad citation behaviors. Contaminated preference labels are detected and filtered before DPO alignment.
 
 
