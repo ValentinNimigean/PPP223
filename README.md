@@ -178,5 +178,15 @@ Ensuring high-quality inputs is essential before executing SFT or DPO. We run st
 * **Contamination Audit (`scripts/audit_training_data.py`)**: Automatically scans and rejects training files that contain local machine absolute paths (e.g., `file://`, `/Users/`, `/home/`), ensuring the agent does not memorize local setup environments.
 * **DPO Validation (`scripts/validate_dpo.py`)**: Checks preference files for schema validity, response divergence, fake refusal patterns, and correct symbol citations. Pipeline runs will automatically abort if errors are encountered.
 
+---
 
+## 📄 License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+---
+
+## 💡 Contact
+
+Questions, feedback, or ideas? Reach out anytime at [sebastian.soptelea@proton.me](mailto:sebastian.soptelea@proton.me).
 
